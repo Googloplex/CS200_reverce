@@ -1,24 +1,24 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-dxl_cli.py — Dynamixel Protocol 1.0 с ПК для серв Kpower HB200T (родная прошивка и клон fw/).
+dxl_cli.py — Dynamixel Protocol 1.0 from a PC for Kpower HB200T servos (stock firmware and the fw/ clone).
 
-  py -3.11 tools/dxl_cli.py -p COM5 scan                 # поиск ID 0..253
+  py -3.11 tools/dxl_cli.py -p COM5 scan                 # scan IDs 0..253
   py -3.11 tools/dxl_cli.py -p COM5 ping 1
-  py -3.11 tools/dxl_cli.py -p COM5 read 1 0 128         # вся таблица регистров
-  py -3.11 tools/dxl_cli.py -p COM5 write 1 0x1E 1500    # Goal Position (u16, мкс 900..2100)
-  py -3.11 tools/dxl_cli.py -p COM5 writeb 1 0x18 1      # Torque Enable (байт)
-  py -3.11 tools/dxl_cli.py -p COM5 watch 1              # Present Position/Load/Voltage раз в 100 мс
-  py -3.11 tools/dxl_cli.py -p COM5 boot 1               # команда 0x64 — в загрузчик
+  py -3.11 tools/dxl_cli.py -p COM5 read 1 0 128         # whole register table
+  py -3.11 tools/dxl_cli.py -p COM5 write 1 0x1E 1500    # Goal Position (u16, µs 900..2100)
+  py -3.11 tools/dxl_cli.py -p COM5 writeb 1 0x18 1      # Torque Enable (byte)
+  py -3.11 tools/dxl_cli.py -p COM5 watch 1              # Present Position/Load/Voltage every 100 ms
+  py -3.11 tools/dxl_cli.py -p COM5 boot 1               # command 0x64 — into bootloader
 
-Скорость по умолчанию 117647 (регистр Baud=16 → 2 000 000/17). Провод S — полудуплекс: нужен адаптер
-USB-UART с объединёнными TX/RX (резистор/диод); собственное эхо отфильтровывается.
+Default baud 117647 (register Baud=16 → 2 000 000/17). Wire S is half-duplex: needs a USB-UART adapter
+with TX/RX joined (resistor/diode); own echo is filtered out.
 """
 import argparse, struct, sys, time
 try:
     import serial
 except ImportError:
-    sys.exit("нужен pyserial: py -3.11 -m pip install pyserial")
+    sys.exit("pyserial required: py -3.11 -m pip install pyserial")
 
 BROADCAST = 0xFE
 INST = {"ping": 1, "read": 2, "write": 3, "reg_write": 4, "action": 5, "reset": 6, "boot": 0x64, "sync_write": 0x83}
@@ -49,7 +49,7 @@ class Bus:
         buf = b""
         while time.time() < deadline:
             buf += self.ser.read(64)
-            if buf.startswith(tx):          # эхо собственной передачи
+            if buf.startswith(tx):          # echo of own transmission
                 buf = buf[len(tx):]
             i = buf.find(b"\xff\xff")
             if i >= 0 and len(buf) >= i + 4:
@@ -86,7 +86,7 @@ def main():
         for i in range(0, 254):
             r = bus.xfer(i, INST["ping"])
             if r:
-                print(f"ID {i}: ответ, ошибки={r['errs']}")
+                print(f"ID {i}: reply, errors={r['errs']}")
         return
     dev = ival(a.args[0])
     if a.cmd == "ping":
@@ -95,7 +95,7 @@ def main():
         addr, n = ival(a.args[1]), ival(a.args[2])
         r = bus.xfer(dev, INST["read"], bytes([addr, n]))
         if r and "params" in r:
-            print(fmt_regs(addr, r["params"]), "\nошибки:", r["errs"])
+            print(fmt_regs(addr, r["params"]), "\nerrors:", r["errs"])
         else:
             print(r)
     elif a.cmd == "write":
@@ -113,7 +113,7 @@ def main():
                     pos, spd, load = struct.unpack_from("<hHH", p, 0)
                     print(f"\rpos={pos:5d} load={load:5d} V={p[6] / 10:4.1f} T={p[7]:3d} err={r['errs']}   ", end="")
                 else:
-                    print("\rнет ответа", end="")
+                    print("\rno reply", end="")
                 time.sleep(0.1)
         except KeyboardInterrupt:
             print()

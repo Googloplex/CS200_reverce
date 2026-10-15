@@ -1,179 +1,181 @@
-# Прошивка v1.5 (fw/, версия 0x25): справочник регистров и поведения
+# Firmware v1.5 (fw/, version 0x25): register and behavior reference
 
-Совместима с родной (Dynamixel 1.0, таблица AX-12 + поля Kpower, см. `docs/native_fw_config.md`): адреса 0x00–0x4F и журнал
-во Flash те же. Хронология стендов и измерений — `docs/bench_log.md`, мотор — `docs/motor.md`.
+Evidence tags: [MEAS] measured, [DS] datasheet, [SPEC] vendor spec sheet, [HYP] hypothesis.
 
-**Единицы.** Положение — единицы АЦП потенциометра 0..4095 (≈16.8 ед/°, [ГИП]); скорость — ед/с или шаги Холлов/с
-(6·pp шагов на оборот ротора, pp = 1; 0.206 шага на единицу АЦП); duty — 0..1023 от Vbus; ток — мА; Vbus — мВ.
+Compatible with stock (Dynamixel 1.0, AX-12 table + Kpower fields, see `docs/native_fw_config.md`): addresses 0x00–0x4F and the Flash
+journal are the same. Bench test chronology and measurements — `docs/bench_log.md`, motor — `docs/motor.md`.
 
-**Где что хранится.**
-- 0x00–0x7F — таблица стока + настройки v1: запись по шине в EEPROM-часть (0x00–0x17) и в 0x50–0x5F сохраняет журнал
-  (0x08007C00, формат стока). Запись по SWD журнал не трогает (символ `g_save_flag` = 1 — сохранить вручную).
-- 0x80–0xFF (`regs2`) — RAM. Настройки из него сохраняются командой CFG2_CMD = 1 в свой сектор 0x08007A00 (16 слотов × 32 Б,
-  запись хранит длину карты — старая запись не затирает новые поля) и загружаются при старте.
-- Запись во Flash (журнал, конфигурация) выполняется только при выключенном моменте, иначе откладывается: во время
-  программирования ядро стоит, а ISR во Flash.
+**Units.** Position — potentiometer ADC units 0..4095 (≈16.8 units/°, [HYP]); speed — units/s or Hall steps/s
+(6·pp steps per rotor revolution, pp = 1; 0.206 steps per ADC unit); duty — 0..1023 of Vbus; current — mA; Vbus — mV.
 
-## 1. Настройки в таблице стока (0x00–0x5F), сверх родных
+**Where things are stored.**
+- 0x00–0x7F — stock table + v1 settings: a bus write to the EEPROM part (0x00–0x17) and to 0x50–0x5F saves the journal
+  (0x08007C00, stock format). SWD writes do not touch the journal (symbol `g_save_flag` = 1 — save manually).
+- 0x80–0xFF (`regs2`) — RAM. Its settings are saved by CFG2_CMD = 1 to their own sector 0x08007A00 (16 slots × 32 B,
+  the record stores the map length — an old record does not overwrite new fields) and loaded at startup.
+- Flash writes (journal, config) are performed only with torque off, otherwise deferred: the core stalls during
+  programming, and the ISRs are in Flash.
 
-| Адр | Тип | Имя | Единицы | Что делает |
+## 1. Settings in the stock table (0x00–0x5F), beyond stock
+
+| Addr | Type | Name | Units | What it does |
 |---|---|---|---|---|
-| 0x13 | u8 | STEPS_PER_CNT | ×0.001 | шагов Холлов на единицу АЦП; servo_01: 206 (измерено самотестом на установившемся ходу) |
-| 0x16 | u16 | R_REF | мОм | сопротивление обмотки фаза-фаза для модели (потолок тока, ff, I²t, T_EST); servo_01: 505 (заблокированный вал) |
-| 0x32 | u8 | LIMIT_HW | ×100 мА | аппаратный лимит среднего тока шины: сторож АЦП (канал 11, HT) → OCREF_CLR TIM1; 0 = выкл |
-| 0x34 | u16 | KV | об/мин/В | 1470–1480 при pp = 1 |
-| 0x36 | u8 | PP | | пар полюсов: 1 [ИЗМ, два стенда] |
-| 0x37 | u8 | CTRL_MODE | | контур по Goal: 0 сток, 1 v1 (трапеция + PD по Холлам; при CW = CCW = 0 — замкнутая скорость) |
-| 0x38 | u16 | PROFILE_VMAX | ед/с | профиль v1, 0 = без ограничения |
-| 0x3A | u16 | PROFILE_ACC | ×100 ед/с² | профиль v1, 0 = без ограничения |
-| 0x3C | u8 | KP | ×0.1 duty/ед | контур v1 (31 ≈ сток) |
-| 0x3D | u8 | KD | duty на 100 шаг/с | контур v1 |
-| 0x3E | u16 | VBUS_MIN | мВ | ниже 5 мс подряд → момент выкл, STATUS 0x40 (не раньше 500 мс после старта) |
-| 0x50 | u16 | LIMIT_CURRENT | мА | **момент в амперах**: потолок duty по модели (I·R_REF + Ke·ω)/Vbus каждую мс; измеренный ток — страховка (1.5·лимита, ≥ 5 мс) |
-| 0x52 | u16 | LIMIT_SPEED | шаг/с | предел оборотов ротора, мягкий откат |
-| 0x54 | u16 | BUS_TIMEOUT | мс | нет пакетов нам дольше → отказ по FAULT_MODE, STATUS 0x04 (снимается следующим пакетом) |
-| 0x56 | u16 | VBUS_MAX | мВ | выше 5 мс подряд → момент выкл, STATUS 0x10 |
-| 0x58 | u16 | I_CONT | мА | длительный ток для I²t: при исчерпании бюджета потолок режется до I_CONT (и модельный тоже) |
-| 0x5C | u16 | LOAD_OFFSET | ед Load | смещение нуля датчика тока, автокалибруется при выключенном моменте |
-| 0x5E | u8 | CFG_FLAGS | биты | см. §4 |
-| 0x5F | u8 | BUS_SLOT | ×10 мкс | слот ответа в SYNC_READ / UID_SCAN (30) |
+| 0x13 | u8 | STEPS_PER_CNT | ×0.001 | Hall steps per ADC unit; servo_01: 206 (measured by self-test on steady-state travel) |
+| 0x16 | u16 | R_REF | mΩ | phase-to-phase winding resistance for the model (current ceiling, ff, I²t, T_EST); servo_01: 505 (locked shaft) |
+| 0x32 | u8 | LIMIT_HW | ×100 mA | hardware limit of average bus current: ADC watchdog (channel 11, HT) → OCREF_CLR TIM1; 0 = off |
+| 0x34 | u16 | KV | rpm/V | 1470–1480 at pp = 1 |
+| 0x36 | u8 | PP | | pole pairs: 1 [MEAS, two bench tests] |
+| 0x37 | u8 | CTRL_MODE | | loop on Goal: 0 stock, 1 v1 (trapezoidal profile + PD on Halls; with CW = CCW = 0 — closed-loop speed) |
+| 0x38 | u16 | PROFILE_VMAX | units/s | v1 profile, 0 = unlimited |
+| 0x3A | u16 | PROFILE_ACC | ×100 units/s² | v1 profile, 0 = unlimited |
+| 0x3C | u8 | KP | ×0.1 duty/unit | v1 loop (31 ≈ stock) |
+| 0x3D | u8 | KD | duty per 100 steps/s | v1 loop |
+| 0x3E | u16 | VBUS_MIN | mV | below for 5 ms in a row → torque off, STATUS 0x40 (not earlier than 500 ms after startup) |
+| 0x50 | u16 | LIMIT_CURRENT | mA | **torque in amps**: duty ceiling from the model (I·R_REF + Ke·ω)/Vbus every ms; measured current is a backstop (1.5·limit, ≥ 5 ms) |
+| 0x52 | u16 | LIMIT_SPEED | steps/s | rotor speed limit, soft rollback |
+| 0x54 | u16 | BUS_TIMEOUT | ms | no packets addressed to us for longer → fault per FAULT_MODE, STATUS 0x04 (cleared by the next packet) |
+| 0x56 | u16 | VBUS_MAX | mV | above for 5 ms in a row → torque off, STATUS 0x10 |
+| 0x58 | u16 | I_CONT | mA | continuous current for I²t: when the budget is exhausted the ceiling is cut to I_CONT (the model one too) |
+| 0x5C | u16 | LOAD_OFFSET | Load units | current sensor zero offset, auto-calibrated with torque off |
+| 0x5E | u8 | CFG_FLAGS | bits | see §4 |
+| 0x5F | u8 | BUS_SLOT | ×10 µs | response slot in SYNC_READ / UID_SCAN (30) |
 
-Семантика стока сохранена: запись Goal Position по шине включает момент и ставит Torque Limit = Max Torque;
-Present Voltage (0x2A) считается по стендовой калибровке и насыщается на 25.5 В — для 48 В брать VBUS_MV.
+Stock semantics are preserved: a bus write of Goal Position enables torque and sets Torque Limit = Max Torque;
+Present Voltage (0x2A) is computed from the bench calibration and saturates at 25.5 V — for 48 V use VBUS_MV.
 
-## 2. Телеметрия в таблице стока (0x60–0x77, только чтение)
+## 2. Telemetry in the stock table (0x60–0x77, read-only)
 
-| Адр | Тип | Имя | Единицы | Примечание |
+| Addr | Type | Name | Units | Note |
 |---|---|---|---|---|
-| 0x60 | s16 | HALL_SPEED | шаг/с | скорость ротора, знак = направление; усреднение по 6 фронтам (оборот) + ограничение 1/(время с фронта) |
-| 0x62 | s32 | HALL_COUNT | шагов | счётчик ротора |
-| 0x66 | u16 | I_BUS | мА | ток шины: (отсчёт − смещение) × 6.47; АЦП синхронно с ШИМ (TIM1_OC4); сигнал на плате отфильтрован → средний ток |
-| 0x68 | u16 | VBUS_MV | мВ | 13.12 мВ/ед (1829 ед ↔ 24.0 В) |
-| 0x6A | u16 | I_WIND | мА | оценка тока обмотки = I_BUS/duty (ниже duty 80 = I_BUS); в переходах завышена |
-| 0x6C | u8 | STATUS | биты | см. §4 |
-| 0x6D | u8 | HALL_CODE | | код Холлов на последнем фронте |
-| 0x6E | u16 | UPTIME | с | |
-| 0x70 | u8 | THERMAL | % | тепловой бюджет I²t: 1600 Дж, τ 60 с [ГИП] |
+| 0x60 | s16 | HALL_SPEED | steps/s | rotor speed, sign = direction; averaged over 6 edges (one revolution) + bounded by 1/(time since edge) |
+| 0x62 | s32 | HALL_COUNT | steps | rotor counter |
+| 0x66 | u16 | I_BUS | mA | bus current: (sample − offset) × 6.47; ADC synchronous with PWM (TIM1_OC4); the signal is filtered on the board → average current |
+| 0x68 | u16 | VBUS_MV | mV | 13.12 mV/unit (1829 units ↔ 24.0 V) |
+| 0x6A | u16 | I_WIND | mA | winding current estimate = I_BUS/duty (below duty 80 = I_BUS); overestimated in transients |
+| 0x6C | u8 | STATUS | bits | see §4 |
+| 0x6D | u8 | HALL_CODE | | Hall code at the last edge |
+| 0x6E | u16 | UPTIME | s | |
+| 0x70 | u8 | THERMAL | % | I²t thermal budget: 1600 J, τ 60 s [HYP] |
 | 0x71 | s8 | T_EST | °C | 25 + (R_EST/R_REF − 1)/0.00393 |
-| 0x72 | u16 | I_WIND_MAX | мА | пик с запуска |
-| 0x74 | u16 | DUTY | | текущая скважность |
-| 0x76 | u16 | R_EST | мОм | онлайн (Vbus·D − Ke·ω)/I при ровном duty ≥ 20 мс и токе > 0.8 А |
+| 0x72 | u16 | I_WIND_MAX | mA | peak since startup |
+| 0x74 | u16 | DUTY | | current duty |
+| 0x76 | u16 | R_EST | mΩ | online (Vbus·D − Ke·ω)/I with steady duty ≥ 20 ms and current > 0.8 A |
 
-## 3. Блок regs2 (0x80–0xFF, RAM; «cfg» = сохраняется командой CFG2_CMD = 1)
+## 3. regs2 block (0x80–0xFF, RAM; "cfg" = saved by CFG2_CMD = 1)
 
-| Адр | Тип | Имя | Единицы | Что делает |
+| Addr | Type | Name | Units | What it does |
 |---|---|---|---|---|
-| 0x80 | s16 | CMD_POS | ед | **команда импеданса** (писать блок 0x80..0x8F одной записью): цель p |
-| 0x82 | s16 | CMD_VEL | ед/с | скорость цели v: цель едет 100 мс после команды (удержание 1-го порядка), демпфер считается относительно v |
-| 0x84 | u16 | CMD_KP | ×0.01 duty/ед | 310 ≈ сток |
-| 0x86 | u16 | CMD_KD | ×0.001 duty/(ед/с) | 60 по умолчанию (стенд: 20 — перерег. 80 ед; 60 — 0–4 ед, 0.12–0.15 с; 150 — 0.27 с) |
-| 0x88 | s16 | CMD_FF | мА | прямой момент через модель u = I·R_REF + Ke·ω; с CFG_ILOOP в режиме момента замыкается по току |
-| 0x8A | u16 | CMD_TMAX | duty | предел |duty| (0 = 1023) |
-| 0x8C | u8 | CMD_MODE | | 0 — старый контур по Goal; 1 — импеданс (ступенька в момент CMD_AT); 2 — импеданс с кубической интерполяцией от текущей цели и её скорости к (p, v) к моменту CMD_AT, новая точка на ходу склеивается без рывка |
-| 0x8D | u16 | CMD_AT | мс хоста | когда применить (мл. 16 бит часов хоста), 0 = сразу; опоздавшая — сразу |
-| 0x8F | u8 | CMD_SEQ | | последний байт блока: смена = команда записана целиком |
-| 0x90 | s16 | TLM_POS | ед | **быстрая телеметрия** — один SYNC_READ 0x90 len 16 на всех |
-| 0x92 | s16 | TLM_VEL | ед/с | по Холлам |
-| 0x94 | u16 | TLM_IBUS | мА | |
-| 0x96 | s8 | TLM_TEMP | °C | оценка обмотки |
+| 0x80 | s16 | CMD_POS | units | **impedance command** (write block 0x80..0x8F in a single write): target p |
+| 0x82 | s16 | CMD_VEL | units/s | target velocity v: the target moves for 100 ms after the command (first-order hold), damping is relative to v |
+| 0x84 | u16 | CMD_KP | ×0.01 duty/unit | 310 ≈ stock |
+| 0x86 | u16 | CMD_KD | ×0.001 duty/(units/s) | 60 by default (bench: 20 — overshoot 80 units; 60 — 0–4 units, 0.12–0.15 s; 150 — 0.27 s) |
+| 0x88 | s16 | CMD_FF | mA | feedforward torque via the model u = I·R_REF + Ke·ω; with CFG_ILOOP in torque mode it is closed on current |
+| 0x8A | u16 | CMD_TMAX | duty | limit on |duty| (0 = 1023) |
+| 0x8C | u8 | CMD_MODE | | 0 — old loop on Goal; 1 — impedance (step at time CMD_AT); 2 — impedance with cubic interpolation from the current target and its velocity to (p, v) by time CMD_AT, a new point mid-move is joined without a jerk |
+| 0x8D | u16 | CMD_AT | host ms | when to apply (low 16 bits of host clock), 0 = immediately; a late one — immediately |
+| 0x8F | u8 | CMD_SEQ | | last byte of the block: change = command fully written |
+| 0x90 | s16 | TLM_POS | units | **fast telemetry** — one SYNC_READ 0x90 len 16 for all |
+| 0x92 | s16 | TLM_VEL | units/s | from Halls |
+| 0x94 | u16 | TLM_IBUS | mA | |
+| 0x96 | s8 | TLM_TEMP | °C | winding estimate |
 | 0x97 | u8 | TLM_STATUS | | = STATUS |
-| 0x98 | u16 | TLM_VBUS | мВ | |
+| 0x98 | u16 | TLM_VBUS | mV | |
 | 0x9A | u16 | TLM_DUTY | | |
-| 0x9C | u32 | TLM_TIME | мс | часы хоста после TIME_SYNC, иначе локальные |
-| 0xA0 | u32 | TIME_OFFSET | мс | host − local |
-| 0xA4 | u16 | SOFT_MIN | ед | cfg; мягкий упор снизу (0 = нет): цель режется, за упором пружина |
-| 0xA6 | u16 | SOFT_MAX | ед | cfg; мягкий упор сверху |
-| 0xA8 | u8 | SOFT_KP | ×0.1 duty/ед | cfg; жёсткость пружины за упором (50) |
-| 0xA9 | u8 | FAULT_MODE | | cfg; без момента и при мягком отказе: 0 тормоз (нижние ключи), 1 свободный ход (все выходы TIM1 сняты), 2 удержание в точке отказа (импеданс, tmax = HOLD_TMAX) |
-| 0xAA | u16 | STALL_DUTY | duty | cfg; детект упора: |выход контура| ≥ этого при скорости < 100 ед/с дольше STALL_MS (0 = выкл) |
-| 0xAC | u8 | STALL_MS | мс | cfg (50) |
-| 0xAD | u8 | STALL_ACT | | cfg; 0 флаг, 1 выход ×¼ пока упор, 2 отказ по FAULT_MODE. Флаг снимается новой командой или движением |
-| 0xAE | u8 | STATUS2 | биты | см. §4 |
-| 0xAF | u8 | TAU_AVAIL | % | SOA: доступный момент сейчас — LIMIT_CURRENT линейно снижается к I_CONT по мере расхода теплового бюджета |
-| 0xB0 | u16 | HOLD_TMAX | duty | cfg; предел удержания по отказу (300) |
-| 0xB2 | s8 | TEMP_MCU | °C | кристалл по ADC_IN16 раз в секунду, заводская калибровка 0x1FFFF580 (servo_01: 26.6 °C ↔ 2018, 105 °C ↔ 2544) |
-| 0xB3 | u8 | STATE | | автомат: 0 BOOT, 1 READY, 2 ENABLED, 3 HOLD, 4 SELFTEST, 5 FAULT (Vbus/Холлы), 6 LATCHED |
-| 0xB4 | 12 Б | UID | | 96-битный UID чипа — копия 0x1FFFF5B0 («72274497» + 4 байта) [ГИП: адрес по виду данных, сверить по второй серве] |
-| 0xC0 | u32 | ENERGY_MJ | мДж | из шины с запуска (рекуперацию однополярный шунт не видит) |
-| 0xC4 | u32 | ODO_STEPS | шагов | одометр ротора по модулю (включая мёртвый ход и дрожание в удержании) |
-| 0xC8 | u16 | PKT_OK | | пакетов нам с верной контрольной суммой |
-| 0xCA | u16 | PKT_ERR | | с ошибкой |
-| 0xCC | u16 | FRIC_IC | мА | трение Кулона без нагрузки (самотест); вычитается из TLM_TORQUE |
-| 0xCE | u16 | FRIC_KV | мкА на шаг/с | вязкое трение (самотест) |
-| 0xD0 | u8 | BB_CTRL | | **чёрный ящик**: запись 0 — пуск, 1 — заморозить; чтение: 1 = заморожен. Кольцо 52 × 8 Б с шагом 5 мс (260 мс); событие (Холлы, Vbus, таймаут, I²t, упор, конец TEST_UNLIMITED) → ещё 10 записей и заморозка |
-| 0xD1 | u8 | BB_PAGE | | страница окна 0..25 (по 2 записи, от старой к новой) |
-| 0xD2 | u16 | BB_HEAD | | число записей с запуска |
-| 0xD4 | u8 | BB_TRIG | | что заморозило: биты STATUS, 0x80 упор, 0xFF вручную |
-| 0xD5 | u8 | CFG2_CMD | | 1 сохранить cfg; 2 самотест (только из покоя); 3 снять защёлку; 4 TEST_UNLIMITED — 10 с без потолков тока/оборотов/I²t, флаг STATUS2 0x80, по истечении чёрный ящик замораживается |
-| 0xD6 | u16 | CONTACT_DECEL | ед/с за 1 мс | cfg; контакт/удар без IMU: ротор затормозил вдоль движения на ≥ этого 2 мс подряд при толкающем контуре → STATUS2 0x20 на 50 мс (0 = выкл) |
-| 0xD7 | s8 | SINE_OFS | °эл. | cfg; сдвиг расстановки Холлов относительно фаз для синуса; servo_01: +6 |
-| 0xD8 | s16 | TLM_TORQUE | мН·м | момент на выходе: (I_wind − трение)·Kt·N без КПД редуктора; знак — направление выхода |
-| 0xDA | u16 | N_GEAR | ×0.1 | cfg; передаточное число (2230) [ГИП] |
-| 0xDC | u16 | KT | мкН·м/А | cfg; ротор; 0 = 9549296/KV |
-| 0xDE | u8 | ST_RESULT | биты | самотест: 1 Холлы, 2 направление как в CFG, 4 R измерен (только под нагрузкой; иначе R_REF), 8 Kv, 16 шаг/ед ±30 %, 0x40 прервано, 0x80 готово |
-| 0xDF | u8 | ST_FRICTION | duty | страгивание ротора |
-| 0xE0 | u16 | ST_R | мОм | |
-| 0xE2 | u16 | ST_KV | об/мин/В | |
-| 0xE4 | u16 | ST_SPC | ×0.001 | шаг/ед на установившемся ходу |
-| 0xE6 | s8 | SINE_ADV | °эл. | cfg; опережение вектора вдоль момента; servo_01: +8 |
-| 0xE7 | s8 | ST_DIR | | −1: счётчик Холлов убывает при росте положения (принято в прошивке), +1 наоборот |
-| 0xE8 | 16 Б | BB_WIN | | окно чёрного ящика: 2 записи {pos s16, vel s16, I_bus u16, duty/4 u8, status u8} |
-| 0xF8 | u16 | ST_BACKLASH | шагов | мёртвый ход при реверсе: шаги Холлов до сдвига выхода на 5 ед; 0xFFFF — выход не сдвинулся |
+| 0x9C | u32 | TLM_TIME | ms | host clock after TIME_SYNC, otherwise local |
+| 0xA0 | u32 | TIME_OFFSET | ms | host − local |
+| 0xA4 | u16 | SOFT_MIN | units | cfg; lower soft limit (0 = none): target is clamped, a spring beyond the limit |
+| 0xA6 | u16 | SOFT_MAX | units | cfg; upper soft limit |
+| 0xA8 | u8 | SOFT_KP | ×0.1 duty/unit | cfg; spring stiffness beyond the limit (50) |
+| 0xA9 | u8 | FAULT_MODE | | cfg; with torque off and on a soft fault: 0 brake (low-side switches), 1 coast (all TIM1 outputs released), 2 hold at the fault point (impedance, tmax = HOLD_TMAX) |
+| 0xAA | u16 | STALL_DUTY | duty | cfg; stall detection: |loop output| ≥ this at speed < 100 units/s for longer than STALL_MS (0 = off) |
+| 0xAC | u8 | STALL_MS | ms | cfg (50) |
+| 0xAD | u8 | STALL_ACT | | cfg; 0 flag, 1 output ×¼ while stalled, 2 fault per FAULT_MODE. The flag is cleared by a new command or by motion |
+| 0xAE | u8 | STATUS2 | bits | see §4 |
+| 0xAF | u8 | TAU_AVAIL | % | SOA: torque available now — LIMIT_CURRENT decreases linearly toward I_CONT as the thermal budget is consumed |
+| 0xB0 | u16 | HOLD_TMAX | duty | cfg; hold limit on fault (300) |
+| 0xB2 | s8 | TEMP_MCU | °C | die, via ADC_IN16 once per second, factory calibration 0x1FFFF580 (servo_01: 26.6 °C ↔ 2018, 105 °C ↔ 2544) |
+| 0xB3 | u8 | STATE | | state machine: 0 BOOT, 1 READY, 2 ENABLED, 3 HOLD, 4 SELFTEST, 5 FAULT (Vbus/Halls), 6 LATCHED |
+| 0xB4 | 12 B | UID | | 96-bit chip UID — copy of 0x1FFFF5B0 ("72274497" + 4 bytes) [HYP: address inferred from the data, verify on a second servo] |
+| 0xC0 | u32 | ENERGY_MJ | mJ | drawn from the bus since startup (the unipolar shunt does not see regeneration) |
+| 0xC4 | u32 | ODO_STEPS | steps | rotor odometer, absolute (including backlash and dithering in hold) |
+| 0xC8 | u16 | PKT_OK | | packets addressed to us with a valid checksum |
+| 0xCA | u16 | PKT_ERR | | with an error |
+| 0xCC | u16 | FRIC_IC | mA | Coulomb friction without load (self-test); subtracted from TLM_TORQUE |
+| 0xCE | u16 | FRIC_KV | µA per step/s | viscous friction (self-test) |
+| 0xD0 | u8 | BB_CTRL | | **flight recorder**: write 0 — start, 1 — freeze; read: 1 = frozen. Ring of 52 × 8 B at 5 ms intervals (260 ms); event (Halls, Vbus, timeout, I²t, stall, end of TEST_UNLIMITED) → 10 more records and freeze |
+| 0xD1 | u8 | BB_PAGE | | window page 0..25 (2 records each, oldest to newest) |
+| 0xD2 | u16 | BB_HEAD | | number of records since startup |
+| 0xD4 | u8 | BB_TRIG | | what froze it: STATUS bits, 0x80 stall, 0xFF manual |
+| 0xD5 | u8 | CFG2_CMD | | 1 save cfg; 2 self-test (only from rest); 3 clear latch; 4 TEST_UNLIMITED — 10 s without current/speed/I²t ceilings, flag STATUS2 0x80, on expiry the flight recorder freezes |
+| 0xD6 | u16 | CONTACT_DECEL | units/s per 1 ms | cfg; contact/impact without an IMU: rotor decelerated along the motion by ≥ this for 2 ms in a row while the loop is pushing → STATUS2 0x20 for 50 ms (0 = off) |
+| 0xD7 | s8 | SINE_OFS | °el. | cfg; Hall sensor placement offset relative to the phases for sinusoidal; servo_01: +6 |
+| 0xD8 | s16 | TLM_TORQUE | mN·m | output torque: (I_wind − friction)·Kt·N without gearbox efficiency; sign — output direction |
+| 0xDA | u16 | N_GEAR | ×0.1 | cfg; gear ratio (2230) [HYP] |
+| 0xDC | u16 | KT | µN·m/A | cfg; rotor; 0 = 9549296/KV |
+| 0xDE | u8 | ST_RESULT | bits | self-test: 1 Halls, 2 direction as in CFG, 4 R measured (only under load; otherwise R_REF), 8 Kv, 16 steps/unit ±30 %, 0x40 aborted, 0x80 done |
+| 0xDF | u8 | ST_FRICTION | duty | rotor breakaway |
+| 0xE0 | u16 | ST_R | mΩ | |
+| 0xE2 | u16 | ST_KV | rpm/V | |
+| 0xE4 | u16 | ST_SPC | ×0.001 | steps/unit on steady-state travel |
+| 0xE6 | s8 | SINE_ADV | °el. | cfg; vector phase advance along the torque; servo_01: +8 |
+| 0xE7 | s8 | ST_DIR | | −1: Hall counter decreases as position increases (assumed in firmware), +1 the opposite |
+| 0xE8 | 16 B | BB_WIN | | flight recorder window: 2 records {pos s16, vel s16, I_bus u16, duty/4 u8, status u8} |
+| 0xF8 | u16 | ST_BACKLASH | steps | backlash on reversal: Hall steps until the output moves by 5 units; 0xFFFF — output did not move |
 
-## 4. Биты и коды
+## 4. Bits and codes
 
-- **CFG_FLAGS (0x5E)**: 0x01 IWDG 1 с (с защитой от цикла перезагрузок); 0x02 сбой Холлов (код 0/7 трижды) → момент выкл; 0x04 кольцевая
-  ошибка 0..4095 (датчик 360°, кратчайший путь, и в интерполяции тоже); 0x08 инверсия знака скорости; 0x10 **синус** (см. §6, переключается
-  только при TE = 0); 0x20 защёлка жёстких отказов (Vbus, Холлы) до CFG2_CMD = 3; 0x40 контур тока поверх модели в режиме момента (Kp = Kd = 0).
-- **STATUS (0x6C / 0x97)**: 0x01 режет лимит тока, 0x02 лимит оборотов, 0x04 таймаут шины, 0x08 код Холлов 0/7, 0x10 Vbus выше предела,
-  0x20 I²t, 0x40 Vbus ниже предела, 0x80 IWDG отключён защитой от цикла.
-- **STATUS2 (0xAE)**: 0x01 упор, 0x02 за мягким упором, 0x04 удержание по отказу, 0x08 идёт интерполяция, 0x10 свободный ход, 0x20 контакт,
-  0x40 самотест, 0x80 TEST_UNLIMITED.
+- **CFG_FLAGS (0x5E)**: 0x01 IWDG 1 s (with reboot-loop protection); 0x02 Hall failure (code 0/7 three times) → torque off; 0x04 wrap-around
+  error 0..4095 (360° sensor, shortest path, in interpolation too); 0x08 invert speed sign; 0x10 **sinusoidal** (see §6, switchable
+  only with TE = 0); 0x20 latch hard faults (Vbus, Halls) until CFG2_CMD = 3; 0x40 current loop on top of the model in torque mode (Kp = Kd = 0).
+- **STATUS (0x6C / 0x97)**: 0x01 current limit clipping, 0x02 speed limit, 0x04 bus timeout, 0x08 Hall code 0/7, 0x10 Vbus above limit,
+  0x20 I²t, 0x40 Vbus below limit, 0x80 IWDG disabled by loop protection.
+- **STATUS2 (0xAE)**: 0x01 stall, 0x02 beyond soft limit, 0x04 hold on fault, 0x08 interpolation in progress, 0x10 coast, 0x20 contact,
+  0x40 self-test, 0x80 TEST_UNLIMITED.
 
-## 5. Инструкции шины сверх стока
+## 5. Bus instructions beyond stock
 
-| Код | Формат | Что делает |
+| Code | Format | What it does |
 |---|---|---|
-| 0x84 SYNC_READ | `FF FF FE LEN 0x84 addr len ID1 … IDn CHK` | каждая серва из списка отвечает статус-пакетом с `len` байт от `addr` через индекс × BUS_SLOT × 10 мкс + Return Delay; 20 серв × 8 Б при 1 Мбит ≈ 6 мс |
-| 0x86 TIME_SYNC | `FF FF FE 06 0x86 t0 t1 t2 t3 CHK` | широковещательно, без ответа: часы хоста (мс) → TIME_OFFSET; дальше CMD_AT = одно время исполнения для всех приводов на шине |
-| 0x87 SET_ID_BY_UID | `FF FF FE 0F 0x87 uid[12] new_id CHK` | ID по серийнику чипа без доступа к серве; отвечает только совпавшая и сохраняет журнал |
-| 0x88 UID_SCAN | `FF FF FE 02 0x88 CHK` | все сервы отвечают своим UID (12 Б) в слоте по байтам UID × BUS_SLOT |
+| 0x84 SYNC_READ | `FF FF FE LEN 0x84 addr len ID1 … IDn CHK` | each servo in the list replies with a status packet of `len` bytes from `addr` after index × BUS_SLOT × 10 µs + Return Delay; 20 servos × 8 B at 1 Mbit ≈ 6 ms |
+| 0x86 TIME_SYNC | `FF FF FE 06 0x86 t0 t1 t2 t3 CHK` | broadcast, no reply: host clock (ms) → TIME_OFFSET; then CMD_AT = a single execution time for all actuators on the bus |
+| 0x87 SET_ID_BY_UID | `FF FF FE 0F 0x87 uid[12] new_id CHK` | set ID by chip serial number without physical access to the servo; only the matching one replies and saves the journal |
+| 0x88 UID_SCAN | `FF FF FE 02 0x88 CHK` | all servos reply with their UID (12 B) in a slot derived from the UID bytes × BUS_SLOT |
 
-Скорость шины — регистр Baud стока: 2 000 000/(Baud+1); Baud = 0 → 2 Мбит (делители PL011 считаются общо). Двусторонняя шина с ПК
-ещё не проверена (адаптеру нужен резистор 470 Ом в TX).
+Bus speed — stock Baud register: 2 000 000/(Baud+1); Baud = 0 → 2 Mbit (PL011 dividers are computed generically). Bidirectional bus with a PC
+not yet tested (the adapter needs a 470 Ω resistor in TX).
 
-## 6. Поведение
+## 6. Behavior
 
-- **Контуры.** CTRL_MODE 0/1 — по Goal стока (мкс 900..2100 → ед). Команда импеданса (CMD_MODE ≠ 0) имеет приоритет:
-  `duty = (p_t − pos)·Kp + (v_t − vel)·Kd + ff(мА) + пружина упоров`, |duty| ≤ TMAX, затем Torque Limit стока и потолки.
-  CMD_MODE 2 ведёт цель кубикой Эрмита от текущей (p, v) к (p, v, at), 50–100 Гц от хоста → гладко на 1 кГц.
-- **Момент в амперах.** LIMIT_CURRENT → потолок duty по модели каждую мс (при вращении навстречу потолок падает до 0 = тормоз);
-  измеренный ток — только страховка. Полный duty с места без потолка — это Vbus/R ≈ 48 А на 24 В: ЛБП уходит в защиту.
-  I²t: THERMAL % и снижение потолка к I_CONT; TAU_AVAIL показывает остаток. TEST_UNLIMITED снимает всё на 10 с с записью предыстории.
-- **Отказы.** Мягкие (таймаут шины, упор с STALL_ACT = 2) → FAULT_MODE: тормоз / свободный ход / удержание. Жёсткие (Vbus с гистерезисом
-  5 мс, Холлы) → момент выкл; с CFG 0x20 защёлкиваются (STATE 6) до CFG2_CMD = 3. Команда импеданса не включает момент в обход защёлки.
-  Все проверки в одном контексте (TIM14, 1 кГц). Необработанное прерывание / HardFault → сброс. IWDG 1 с по флагу.
-- **Самотест (CFG2_CMD = 2, покой, положение 1000..3000, экскурсия до +750/−200 ед, без потолков тока в фазах 1–5):** +120 duty 150 мс →
-  мёртвый ход; +150 200 мс → направление и шаг/ед по второй половине; −300 200 мс и +300 150 мс → R по двум точкам (только если токи
-  различаются ≥ 0.4 А, иначе R_REF), Kv по противоЭДС, трение Кулон + вязкое; затем duty 1/мс до страгивания; возврат импедансом под потолком.
-- **Синус (CFG 0x10).** Три фазы ШИМ, угол = центр сектора Холлов ± шаг за период ШИМ от последнего фронта (как hall-FOC), 3-я гармоника 1/6
-  (линейное напряжение = Vbus·duty, как у шестишаговой), обновление в прерывании TIM1 23.4 кГц без делений (~150 тактов из 3077).
-  SINE_OFS — сдвиг расстановки Холлов (абсолютный), SINE_ADV — опережение вдоль момента. Стенд: 97 % скорости шестишаговой при том же duty, +10 % тока.
-- **Датчики.** Положение: IIR потенциометра как у стока. Температура кристалла раз в секунду подменой последовательности АЦП (DMA перезапускается
-  после каждой остановки АЦП — иначе кольцо каналов сдвигается). Скорость по Холлам: среднее по 6 фронтам, дребезг ближе 60 мкс и повтор кода
-  игнорируются.
+- **Loops.** CTRL_MODE 0/1 — on stock Goal (µs 900..2100 → units). The impedance command (CMD_MODE ≠ 0) takes priority:
+  `duty = (p_t − pos)·Kp + (v_t − vel)·Kd + ff(mA) + limit spring`, |duty| ≤ TMAX, then stock Torque Limit and the ceilings.
+  CMD_MODE 2 moves the target along a Hermite cubic from the current (p, v) to (p, v, at), 50–100 Hz from the host → smooth at 1 kHz.
+- **Torque in amps.** LIMIT_CURRENT → duty ceiling from the model every ms (when rotating against the command the ceiling drops to 0 = brake);
+  measured current is only a backstop. Full duty from standstill without a ceiling is Vbus/R ≈ 48 A at 24 V: the bench PSU trips its protection.
+  I²t: THERMAL % and ceiling reduction toward I_CONT; TAU_AVAIL shows what is left. TEST_UNLIMITED removes everything for 10 s with pre-trigger history recorded.
+- **Faults.** Soft (bus timeout, stall with STALL_ACT = 2) → FAULT_MODE: brake / coast / hold. Hard (Vbus with 5 ms
+  hysteresis, Halls) → torque off; with CFG 0x20 they latch (STATE 6) until CFG2_CMD = 3. The impedance command does not enable torque bypassing the latch.
+  All checks run in one context (TIM14, 1 kHz). Unhandled interrupt / HardFault → reset. IWDG 1 s by flag.
+- **Self-test (CFG2_CMD = 2, at rest, position 1000..3000, excursion up to +750/−200 units, no current ceilings in phases 1–5):** +120 duty 150 ms →
+  backlash; +150 200 ms → direction and steps/unit from the second half; −300 200 ms and +300 150 ms → R from two points (only if the currents
+  differ by ≥ 0.4 A, otherwise R_REF), Kv from back-EMF, friction Coulomb + viscous; then duty 1/ms until breakaway; return by impedance under the ceiling.
+- **Sinusoidal (CFG 0x10).** Three-phase PWM, angle = Hall sector center ± step per PWM period since the last edge (like hall-FOC), 3rd harmonic 1/6
+  (line voltage = Vbus·duty, as in six-step), updated in the TIM1 interrupt at 23.4 kHz without divisions (~150 cycles out of 3077).
+  SINE_OFS — Hall sensor placement offset (absolute), SINE_ADV — phase advance along the torque. Bench: 97 % of six-step speed at the same duty, +10 % current.
+- **Sensors.** Position: potentiometer IIR as in stock. Die temperature once per second by swapping the ADC sequence (DMA is restarted
+  after each ADC stop — otherwise the channel ring shifts). Hall speed: average over 6 edges, bounces closer than 60 µs and repeated codes
+  are ignored.
 
-## 7. Что известно о железе по RM и стенду
-- Триггер АЦП: ADC_EXTCFG группа 3 = TIM1_OC4 (OC4 в PWM2, CCR4 = точка выборки); событие только при CC4E = 1 [ИЗМ].
-- Сторож АЦП (AWDEN, AWDSGL, канал 11, HT) → OCREF_CLR TIM1 через SysCtrl_EDU_CFG4 бит 5; выход сторожа — уровень «внутри окна»,
-  активный низкий (TIM1_SP[5] = 1); источник включается только вместе с лимитом [ИЗМ]. Срез не поцикловый — шунт отфильтрован.
-- ACMP2 на CPP21 = PF6 не переключается ни при каком пороге DAC0 (на CPP20/23 переключается) — компаратор не используется.
-- Датчик температуры ADC_IN16 только в одноканальном режиме; калибровка 0x1FFFF580 (T1, T2, отсчёты при 3.3 В) [ИЗМ].
-- UID: 12 байт по 0x1FFFF5B0 [ГИП], дата чипа по 0x1FFFF854 (servo_01: 2024-11-10).
-- Вход тока PF6 = вывод 17 QFN40 (AD11/OP0N3/CPP21); RC-фильтр и усилитель (6-выв. SOT?) на плате не идентифицированы — для FOC нужен осциллограф.
+## 7. What is known about the hardware from the RM and bench
+- ADC trigger: ADC_EXTCFG group 3 = TIM1_OC4 (OC4 in PWM2, CCR4 = sampling point); event only with CC4E = 1 [MEAS].
+- ADC watchdog (AWDEN, AWDSGL, channel 11, HT) → OCREF_CLR TIM1 via SysCtrl_EDU_CFG4 bit 5; watchdog output is an "inside window" level,
+  active low (TIM1_SP[5] = 1); the source is enabled only together with the limit [MEAS]. The cut is not cycle-by-cycle — the shunt is filtered.
+- ACMP2 on CPP21 = PF6 does not toggle at any DAC0 threshold (on CPP20/23 it toggles) — the comparator is not used.
+- Temperature sensor ADC_IN16 only in single-channel mode; calibration 0x1FFFF580 (T1, T2, samples at 3.3 V) [MEAS].
+- UID: 12 bytes at 0x1FFFF5B0 [HYP], chip date at 0x1FFFF854 (servo_01: 2024-11-10).
+- Current input PF6 = pin 17 of QFN40 (AD11/OP0N3/CPP21); the RC filter and amplifier (6-pin SOT?) on the board are not identified — FOC needs an oscilloscope.
 
-## 8. Статус проверки (servo_01, 2026-10-15) и открытое
-Проверено на стенде: всё из §1–§6, кроме: двусторонняя шина (SYNC_READ/WRITE, TIME_SYNC, 0x87/0x88 по проводу), CFG_ILOOP, ff под нагрузкой,
-аппаратный лимит при 48 В, свободный ход как MOE=0+OSSI (сейчас снятие CCxE, работает). Подробности — `docs/bench_log.md`.
-Открытое по железу: мёртвый ход редуктора при реверсе 38–48 шагов Холлов (~12° выхода) — см. `docs/motor.md`; что выдаёт пад F; поцикловый
-срез тока (ACMP2); RC шунта.
+## 8. Verification status (servo_01, 2026-10-15) and open items
+Bench-verified: everything in §1–§6 except: bidirectional bus (SYNC_READ/WRITE, TIME_SYNC, 0x87/0x88 over the wire), CFG_ILOOP, ff under load,
+hardware limit at 48 V, coast as MOE=0+OSSI (currently by clearing CCxE, works). Details — `docs/bench_log.md`.
+Open hardware items: gearbox backlash on reversal 38–48 Hall steps (~12° at the output) — see `docs/motor.md`; what pad F outputs; cycle-by-cycle
+current cut (ACMP2); shunt RC.

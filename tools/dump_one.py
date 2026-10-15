@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-dump_one.py — read-only дамп одной сервы Kpower HB200T (LCM32F037) по SWD + разбор журнала.
+dump_one.py — read-only dump of one Kpower HB200T servo (LCM32F037) via SWD + journal parsing.
 
-  py -3.11 tools/dump_one.py servo_02                 # дамп + разбор → dumps/servo_02/
-  py -3.11 tools/dump_one.py --parse-only servo_01    # только разобрать уже снятый дамп
-  py -3.11 tools/dump_one.py --table                  # сводная таблица по dumps/*/ → dumps/summary.md
+  py -3.11 tools/dump_one.py servo_02                 # dump + parse → dumps/servo_02/
+  py -3.11 tools/dump_one.py --parse-only servo_01    # only parse an existing dump
+  py -3.11 tools/dump_one.py --table                  # summary table over dumps/*/ → dumps/summary.md
 
-В целевой чип ничего не пишет (только чтение памяти под halt). Существующую папку дампа
-не перезаписывает — для повторного снятия указать --out. Формат журнала и таблица регистров —
-docs/native_fw_config.md; карта памяти — docs/memory_map.md.
+Writes nothing to the target chip (memory reads under halt only). Does not overwrite an existing dump
+folder — use --out for a repeat dump. Journal format and register table —
+docs/native_fw_config.md; memory map — docs/memory_map.md.
 
-Нужен Python с pyOCD (py -3.11), пробник ST-Link/CMSIS-DAP, серва запитана от ЛБП (12–24 В, ~100 мА).
+Needs Python with pyOCD (py -3.11), an ST-Link/CMSIS-DAP probe, servo powered from a bench PSU (12–24 V, ~100 mA).
 """
 import argparse
 import datetime
@@ -24,7 +24,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 DUMPS = ROOT / "dumps"
 
-# (файл, адрес, размер) — только заведомо читаемые области (docs/memory_map.md)
+# (file, address, size) — only regions known to be readable (docs/memory_map.md)
 REGIONS = [
     ("flash.bin", 0x08000000, 0x8000),
     ("option_bytes_1FFFF800.bin", 0x1FFFF800, 0x200),
@@ -32,10 +32,10 @@ REGIONS = [
 ]
 CPUID_ADDR = 0xE000ED00
 FLASH_BASE = 0x08000000
-APP_OFF = 0x1000            # загрузчик Kpower 0x0000–0x0FFF, приложение с 0x1000
+APP_OFF = 0x1000            # Kpower bootloader 0x0000–0x0FFF, application from 0x1000
 JOURNAL_OFF, SLOT, NSLOTS = 0x7C00, 128, 8
 
-# Таблица регистров (Dynamixel AX-12 + свои Kpower): (адрес, имя, размер)
+# Register table (Dynamixel AX-12 + Kpower-specific): (address, name, size)
 REGS = [
     (0x00, "model", 2), (0x02, "fw_ver", 1), (0x03, "id", 1), (0x04, "baud", 1),
     (0x05, "return_delay", 1), (0x06, "cw_limit", 2), (0x08, "ccw_limit", 2),
@@ -57,7 +57,7 @@ def sha256(b: bytes) -> str:
     return hashlib.sha256(b).hexdigest()
 
 
-# ---------- разбор ----------
+# ---------- parsing ----------
 
 def parse_record(r: bytes):
     if len(r) != SLOT or r == b"\xff" * SLOT:
@@ -104,7 +104,7 @@ def parse_info(ob: bytes | None):
     info = {"rdp_byte": ob[0], "bytes_48_4f": ob[0x48:0x50].hex(" ")}
     y, m, d = struct.unpack_from("<HBB", ob, 0x54)
     if 2000 <= y <= 2100 and 1 <= m <= 12 and 1 <= d <= 31:
-        info["date_guess"] = f"{y:04d}-{m:02d}-{d:02d}"   # [ГИП] дата калибровки/выпуска чипа
+        info["date_guess"] = f"{y:04d}-{m:02d}-{d:02d}"   # [HYP] chip calibration/manufacturing date
     return info
 
 
@@ -124,23 +124,23 @@ def analyze(dirpath: Path):
 def print_report(a: dict):
     im, inf, recs = a["image"], a["info"], a["journal"]
     print(f"[{a['label']}] flash sha256 {a['flash_sha256'][:16]}…  code end 0x{im['code_end']:08X}")
-    print(f"  загрузчик SP=0x{im['bl_sp']:08X} Reset=0x{im['bl_reset']:08X} sha {im['bl_sha256'][:8]}; "
-          f"приложение SP=0x{im['app_sp']:08X} Reset=0x{im['app_reset']:08X} sha {(im['app_sha256'] or '-')[:8]}")
+    print(f"  bootloader SP=0x{im['bl_sp']:08X} Reset=0x{im['bl_reset']:08X} sha {im['bl_sha256'][:8]}; "
+          f"application SP=0x{im['app_sp']:08X} Reset=0x{im['app_reset']:08X} sha {(im['app_sha256'] or '-')[:8]}")
     if inf:
-        print(f"  инфо-зона: RDP-байт 0x{inf['rdp_byte']:02X}, дата? {inf.get('date_guess', '-')}, "
-              f"байты 0x48: {inf['bytes_48_4f']}")
-    print(f"  журнал: {len(recs)} записей" + (f", seq {recs[0]['seq']}…{recs[-1]['seq']}" if recs else ""))
+        print(f"  info area: RDP byte 0x{inf['rdp_byte']:02X}, date? {inf.get('date_guess', '-')}, "
+              f"bytes 0x48: {inf['bytes_48_4f']}")
+    print(f"  journal: {len(recs)} records" + (f", seq {recs[0]['seq']}…{recs[-1]['seq']}" if recs else ""))
     for r in recs:
         bad = "" if (r["chk_ok"] and r["marker_ok"]) else "  !! chk/marker"
         print(f"   seq {r['seq']:3d} slot {r['slot']}: id={r['id']} baud={r['baud']} "
               f"goal={r['goal_position']} pres={r['present_position']} load={r['present_load']} "
               f"V={r['present_voltage'] / 10:.1f} T={r['present_temp']} "
               f"pwm={r['pwm_min_us']}/{r['pwm_center_us']}/{r['pwm_max_us']} "
-              f"ход={r['travel_deg']} r46/48={r['reg_46']}/{r['reg_48']} r4c={r['reg_4c']} "
+              f"travel={r['travel_deg']} r46/48={r['reg_46']}/{r['reg_48']} r4c={r['reg_4c']} "
               f"r4e=0x{r['reg_4e']:04X} r5a={r['reg_5a']}{'  Z' if r['flag_z'] else ''}{bad}")
 
 
-# ---------- дамп по SWD ----------
+# ---------- SWD dump ----------
 
 def dump_target(outdir: Path, probe_uid, connect_mode: str):
     import pyocd
@@ -150,7 +150,7 @@ def dump_target(outdir: Path, probe_uid, connect_mode: str):
         unique_id=probe_uid, return_first=True, blocking=False,
         target_override="cortex_m", connect_mode=connect_mode, resume_on_disconnect=True)
     if session is None:
-        sys.exit("Пробник не найден (pyocd list)")
+        sys.exit("Probe not found (pyocd list)")
     data = {}
     with session:
         t = session.board.target
@@ -170,13 +170,13 @@ def dump_target(outdir: Path, probe_uid, connect_mode: str):
         f"date: {datetime.datetime.now().isoformat(timespec='seconds')}\n"
         f"cpuid: 0x{cpuid:08X}\nprobe: {probe}\npyocd: {pyocd.__version__}\n"
         f"connect_mode: {connect_mode}\ntarget_override: cortex_m\n", encoding="utf-8")
-    print(f"CPUID 0x{cpuid:08X}, пробник {probe}, дамп в {outdir}")
+    print(f"CPUID 0x{cpuid:08X}, probe {probe}, dump to {outdir}")
 
 
-# ---------- сводная таблица ----------
+# ---------- summary table ----------
 
 def table(dirs):
-    rows = ["| метка | дата чипа? | записей (seq) | ID/baud | goal→present | V | pwm min/ctr/max | ход | 0x4E | bl / app sha |",
+    rows = ["| label | chip date? | records (seq) | ID/baud | goal→present | V | pwm min/ctr/max | travel | 0x4E | bl / app sha |",
             "|---|---|---|---|---|---|---|---|---|---|"]
     for d in dirs:
         a = analyze(d)
@@ -197,28 +197,28 @@ def table(dirs):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("label", nargs="?", help="метка сервы, например servo_02")
-    ap.add_argument("--out", type=Path, help="папка дампа (по умолчанию dumps/<label>)")
-    ap.add_argument("--parse-only", action="store_true", help="не подключаться, разобрать существующий дамп")
-    ap.add_argument("--table", action="store_true", help="сводная таблица по всем dumps/*/")
-    ap.add_argument("--probe", help="unique ID пробника (если подключено несколько)")
+    ap.add_argument("label", nargs="?", help="servo label, e.g. servo_02")
+    ap.add_argument("--out", type=Path, help="dump folder (default dumps/<label>)")
+    ap.add_argument("--parse-only", action="store_true", help="do not connect, parse an existing dump")
+    ap.add_argument("--table", action="store_true", help="summary table over all dumps/*/")
+    ap.add_argument("--probe", help="probe unique ID (if several are connected)")
     ap.add_argument("--connect", default="under-reset", choices=["under-reset", "halt", "attach"],
-                    help="pyOCD connect_mode (по умолчанию under-reset)")
+                    help="pyOCD connect_mode (default under-reset)")
     args = ap.parse_args()
 
     if args.table:
         dirs = sorted(p for p in DUMPS.iterdir() if (p / "flash.bin").exists())
         md = table(dirs)
-        (DUMPS / "summary.md").write_text(f"# Сводка по сервам ({datetime.date.today()})\n\n{md}", encoding="utf-8")
+        (DUMPS / "summary.md").write_text(f"# Servo summary ({datetime.date.today()})\n\n{md}", encoding="utf-8")
         print(md, end="")
         return
     if not args.label:
-        ap.error("нужна метка сервы или --table")
+        ap.error("servo label or --table required")
 
     outdir = args.out or (DUMPS / args.label)
     if not args.parse_only:
         if outdir.exists():
-            sys.exit(f"{outdir} уже существует — не перезаписываю (укажи --out или --parse-only)")
+            sys.exit(f"{outdir} already exists — not overwriting (use --out or --parse-only)")
         dump_target(outdir, args.probe, args.connect)
 
     a = analyze(outdir)

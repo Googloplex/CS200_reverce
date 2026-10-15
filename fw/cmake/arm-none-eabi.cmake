@@ -2,7 +2,7 @@ set(CMAKE_SYSTEM_NAME Generic)
 set(CMAKE_SYSTEM_PROCESSOR arm)
 set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
 
-# Путь к тулчейну: переменная окружения ARM_TOOLCHAIN_DIR, иначе PATH, иначе стандартная установка.
+# Toolchain path: ARM_TOOLCHAIN_DIR env variable, else PATH, else default install location.
 set(_tc_hints "$ENV{ARM_TOOLCHAIN_DIR}")
 file(GLOB _tc_default "C:/Program Files (x86)/Arm GNU Toolchain arm-none-eabi/*/bin"
                       "C:/Program Files/Arm GNU Toolchain arm-none-eabi/*/bin")

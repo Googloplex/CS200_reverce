@@ -1,79 +1,81 @@
-# fw/ — клон родной прошивки Kpower HB200T под GCC
+# fw/ — GCC clone of the Kpower HB200T stock firmware
 
-Приложение для LCM32F037, линкуется с **0x08001000**: родной загрузчик Kpower (0x08000000–0x08000FFF)
-остаётся на месте, форвардит прерывания через нашу таблицу векторов и умеет заливать приложение по проводу S.
-Журнал настроек (0x08007C00–0x08007FFF) используется в том же формате, что и у родной прошивки.
+Evidence tags: [MEAS] measured, [DS] datasheet, [SPEC] vendor spec sheet, [HYP] hypothesis.
 
-Состояние (2026-10-15): **v1.5 (версия 0x25) прошита в servo_01 и проверена на стенде** с редуктором и без
-(`docs/bench_log.md`). Клон стока сверен с родной 1 в 1 (`docs/clone_ab_test.md`); поверх него — свои контуры и фичи,
-справочник регистров и поведения — `docs/registers_v1.md`. Код без soft-float (Flash 21.8 из 26.5 КБ, RAM 2.6 КБ).
-Не проверено: двусторонняя шина с ПК (адаптер), CFG_ILOOP, прямой момент под нагрузкой, 48 В.
+Application for LCM32F037, linked at **0x08001000**: the stock Kpower bootloader (0x08000000–0x08000FFF)
+stays in place, forwards interrupts through our vector table and can upload the application over wire S.
+The settings journal (0x08007C00–0x08007FFF) is used in the same format as in the stock firmware.
 
-## Сборка и прошивка
+Status (2026-10-15): **v1.5 (version 0x25) flashed into servo_01 and bench-tested** with and without the gearbox
+(`docs/bench_log.md`). The stock clone is verified 1:1 against stock (`docs/clone_ab_test.md`); on top of it — custom loops and features,
+register and behaviour reference — `docs/registers_v1.md`. No soft-float in the code (Flash 21.8 of 26.5 KB, RAM 2.6 KB).
+Not verified: bidirectional bus with a PC (adapter), CFG_ILOOP, direct torque under load, 48 V.
+
+## Build and flash
 ```
-./build.sh                 # Git Bash: CMake + Ninja из ESP-IDF tools, GCC 12.2 из Arm GNU Toolchain
-./flash.sh                 # pyOCD + алгоритм Flash из Keil-пака, только область приложения (сектора 512 Б)
-./restore_native.sh        # вернуть родное приложение из dumps/servo_01/flash.bin
+./build.sh                 # Git Bash: CMake + Ninja from ESP-IDF tools, GCC 12.2 from Arm GNU Toolchain
+./flash.sh                 # pyOCD + Flash algorithm from the Keil pack, application area only (512 B sectors)
+./restore_native.sh        # restore the stock application from dumps/servo_01/flash.bin
 ```
-Серва при этом запитана от ЛБП 12–24 В с ограничением ~100 мА, ST-Link на SWD-гребёнке.
+The servo is powered from a bench PSU at 12–24 V with a ~100 mA limit, ST-Link on the SWD header.
 
-## Файлы
-| Файл | Что | Откуда в родной (`re/decomp_named.c`) |
+## Files
+| File | What | Where in stock (`re/decomp_named.c`) |
 |---|---|---|
-| `ld/app.ld`, `src/startup.c` | таблица векторов по 0x08001000, старт после загрузчика (сброс SysTick/NVIC, копирование .data) | — |
-| `src/system.c` | тактирование: кварц 16 МГц → PLL 72 МГц, LVR, задержка, PF0/PF1 | FUN_08002a4c, 080027cc, 080023e4 |
-| `src/lcm32.h` | регистры по SVD (GPIO AFRL по 0x24!, PL011 UART, DW DMAC, ADC, TIM, FLASH) | — |
-| `src/board.c` | клоки периферии, GPIO платы, EXTI Холлов, NVIC/SysTick | FUN_08003f78, 0800346c, 080038a8 |
-| `src/regs.c` | таблица регистров, заводские значения, калибровка, журнал во Flash; конфигурация v1.5 (сектор 0x08007A00) | FUN_080045dc, 08003a28, 08003908, 08004030, 080048f8 |
-| `src/dxl.c` | UART1+DMA, автомат приёма, Dynamixel 1.0 (PING/READ/WRITE/REG_WRITE/ACTION/RESET/0x64/SYNC_WRITE) + свои 0x84 SYNC_READ, 0x86 TIME_SYNC, 0x87 SET_ID_BY_UID, 0x88 UID_SCAN; ответ с задержкой TIM6 | FUN_080044cc, 0800333c, 080042fc, 0800338c, 08003e50, 080049c8 |
-| `src/sense.c` | АЦП синхронно с ШИМ (4 канала через DMA), положение/ток/Vbus, аппаратный лимит (сторож АЦП), телеметрия, энергия, момент, чёрный ящик, температура кристалла, ШИМ обратной связи на PA0 (TIM16) | FUN_08003220, 080041b0, 080025a0, 08004758 |
-| `src/motor.c` | TIM1 (23.4 кГц, dead-time 0x2F), шестишаговая и синусоидальная коммутация, Холлы как датчик, контуры (сток, v1, импеданс с интерполяцией), потолки тока/оборотов/I²t, отказы и автомат состояний, самотест, вход ШИМ (TIM15) | FUN_080047c8, 08003754, 080036dc, 08003b10, 08003eec, IRQ20 |
-| `src/main.c` | порядок инициализации и главный цикл | FUN_080035e8 |
+| `ld/app.ld`, `src/startup.c` | vector table at 0x08001000, start after the bootloader (SysTick/NVIC reset, .data copy) | — |
+| `src/system.c` | clocking: 16 MHz crystal → PLL 72 MHz, LVR, delay, PF0/PF1 | FUN_08002a4c, 080027cc, 080023e4 |
+| `src/lcm32.h` | registers per SVD (GPIO AFRL at 0x24!, PL011 UART, DW DMAC, ADC, TIM, FLASH) | — |
+| `src/board.c` | peripheral clocks, board GPIO, Hall EXTI, NVIC/SysTick | FUN_08003f78, 0800346c, 080038a8 |
+| `src/regs.c` | register table, factory defaults, calibration, Flash journal; v1.5 configuration (sector 0x08007A00) | FUN_080045dc, 08003a28, 08003908, 08004030, 080048f8 |
+| `src/dxl.c` | UART1+DMA, receive state machine, Dynamixel 1.0 (PING/READ/WRITE/REG_WRITE/ACTION/RESET/0x64/SYNC_WRITE) + custom 0x84 SYNC_READ, 0x86 TIME_SYNC, 0x87 SET_ID_BY_UID, 0x88 UID_SCAN; reply delayed by TIM6 | FUN_080044cc, 0800333c, 080042fc, 0800338c, 08003e50, 080049c8 |
+| `src/sense.c` | ADC synchronous with PWM (4 channels via DMA), position/current/Vbus, hardware limit (ADC watchdog), telemetry, energy, torque, flight recorder, die temperature, feedback PWM on PA0 (TIM16) | FUN_08003220, 080041b0, 080025a0, 08004758 |
+| `src/motor.c` | TIM1 (23.4 kHz, dead-time 0x2F), six-step and sinusoidal commutation, Halls as a sensor, loops (stock, v1, impedance with interpolation), current/rpm/I²t ceilings, faults and state machine, self-test, PWM input (TIM15) | FUN_080047c8, 08003754, 080036dc, 08003b10, 08003eec, IRQ20 |
+| `src/main.c` | init order and main loop | FUN_080035e8 |
 
-## Что известно о родной логике (кратко)
-- **Шина:** 2 000 000 / (BAUD+1) бод (BAUD=16 → 117 647), ID из регистра 3, ответ по Status Return Level,
-  задержка ответа в тиках 2 мкс. Пакеты `FD FD …` (протокол загрузчика) приложение пропускает.
-- **Goal Position (0x1E)** — в микросекундах импульса 900..2100, а не 0..1023. Пересчёт в единицы АЦП:
-  `2048 ± (|goal−1500|/600) · (K/460) · 4095`, K = регистры 0x4E/0x4F (0 → ход 0x4A, т.е. 120).
-- **Present Position (0x24)** = `0xFFF − IIR(ADC потенциометра)/8 + offset(0x14)`.
-- **Present Load (0x28)** = ADC тока × 3.2328 (≈ мА); > 9500 дольше 1 с → Torque Limit = 0.
-- **Present Voltage (0x2A)** = калиброванное напряжение в 0.1 В, насыщается на 25.5 В из-за формата u8;
-  полное значение для 48-вольтовой шины доступно в `VBUS_MV` (0x68, мВ). Температура в стоковом поле не измеряется.
-- **Контур:** профиль с линейно растущей «скоростью» `vel += speed / speed_k`, затем P-регулятор
-  `out = err · 100 / slope` (+ I·0.01 после новой цели), margin 1/5, Punch — минимальный выход,
-  ограничение Torque Limit, направление → инверсия кода Холлов.
-- **Коммутация:** шестишаговая, одна фаза ШИМ (верх) + комплементарный низ, вторая фаза на землю, третья в воздухе.
-  В покое все CCR = 0 → все нижние ключи открыты (динамический тормоз).
-- **Вход ШИМ (PA3):** 900..2100 мкс → Goal Position, включает Torque Enable; скачок > 50 мкс сбрасывает интегратор.
+## What is known about the stock logic (brief)
+- **Bus:** 2 000 000 / (BAUD+1) baud (BAUD=16 → 117 647), ID from register 3, reply per Status Return Level,
+  reply delay in 2 µs ticks. `FD FD …` packets (bootloader protocol) are skipped by the application.
+- **Goal Position (0x1E)** — in pulse microseconds 900..2100, not 0..1023. Conversion to ADC units:
+  `2048 ± (|goal−1500|/600) · (K/460) · 4095`, K = registers 0x4E/0x4F (0 → travel 0x4A, i.e. 120).
+- **Present Position (0x24)** = `0xFFF − IIR(potentiometer ADC)/8 + offset(0x14)`.
+- **Present Load (0x28)** = current ADC × 3.2328 (≈ mA); > 9500 for longer than 1 s → Torque Limit = 0.
+- **Present Voltage (0x2A)** = calibrated voltage in 0.1 V, saturates at 25.5 V due to the u8 format;
+  the full value for a 48 V bus is available in `VBUS_MV` (0x68, mV). Temperature is not measured in the stock field.
+- **Loop:** profile with a linearly ramping "velocity" `vel += speed / speed_k`, then P controller
+  `out = err · 100 / slope` (+ I·0.01 after a new goal), margin 1/5, Punch — minimum output,
+  Torque Limit clamp, direction → Hall code inversion.
+- **Commutation:** six-step, one phase PWM (high) + complementary low, second phase to ground, third floating.
+  At rest all CCR = 0 → all low-side switches on (dynamic brake).
+- **PWM input (PA3):** 900..2100 µs → Goal Position, enables Torque Enable; a jump > 50 µs resets the integrator.
 
-## Отличия от родной (сознательные)
-1. READ: длина ограничена размером таблицы (в родной границ нет).
-2. SYNC_WRITE: граница цикла по LEN (в родной граница вычислена неверно: `pkt[3] − pkt[6] + 1`).
-3. Приём: защита буфера пакета от переполнения.
-4. Тактирование настраивается один раз (родная вызывает SystemInit дважды).
-5. TIM16_CH1 (выход обратной связи на PA0) включён явно — в родной поле OutputState не инициализировано [ГИП].
-6. Неинициализированные поля структур родной прошивки (BDTR TIM1 бит OSSI, BDTR TIM16) воспроизведены как 0x042F / 0x8000.
-7. PA2 (шина) с внутренней подтяжкой вверх (в родной без подтяжки): линия не лежит в нуле без мастера и работает с адаптером через диод.
+## Differences from stock (deliberate)
+1. READ: length bounded by the table size (stock has no bounds).
+2. SYNC_WRITE: loop bound from LEN (in stock the bound is computed wrong: `pkt[3] − pkt[6] + 1`).
+3. Receive: packet buffer overflow protection.
+4. Clocking is configured once (stock calls SystemInit twice).
+5. TIM16_CH1 (feedback output on PA0) is enabled explicitly — in stock the OutputState field is uninitialized [HYP].
+6. Uninitialized struct fields of the stock firmware (TIM1 BDTR OSSI bit, TIM16 BDTR) reproduced as 0x042F / 0x8000.
+7. PA2 (bus) with internal pull-up (stock has none): the line does not sit at zero without a master and works with an adapter through a diode.
 
-## Проверка «1 в 1»
-1. Прошить servo_01, подключить шину: PING ID 1 → ответ; READ 0x00..0x80 → сравнить с журналом/родной.
-2. Родная серва и клон на одной шине с разными ID: одинаковые WRITE Goal → сравнить логи Present Position.
-3. Вход ШИМ 1000/1500/2000 мкс → положение как у родной (1190 / ~2060 / 2936 по журналу).
-4. Чтение Present Load/Voltage на холостом ходу — порядок величин как в журнале (42..87 / 10.6..13.9 В).
+## "1:1" verification
+1. Flash servo_01, connect the bus: PING ID 1 → reply; READ 0x00..0x80 → compare with journal/stock.
+2. Stock servo and clone on one bus with different IDs: identical WRITE Goal → compare Present Position logs.
+3. PWM input 1000/1500/2000 µs → position as in stock (1190 / ~2060 / 2936 per journal).
+4. Read Present Load/Voltage at idle — same order of magnitude as in the journal (42..87 / 10.6..13.9 V).
 
-## Тесты (всё через SWD, `py -3.11`)
-| Скрипт | Что проверяет |
+## Tests (all over SWD, `py -3.11`)
+| Script | What it checks |
 |---|---|
-| `tools/verify_clone.py` | периферия после прошивки (такты, таймеры, UART/DMA, АЦП, журнал) |
-| `tools/pos_test.py` | ступеньки контура по Goal (сток/v1, `--native` для родной), лог CSV |
-| `tools/imp_test.py` | импеданс: удержание, Kd-свип, полный duty под потолком тока, удержание 1-го порядка, время хоста, ff |
-| `tools/feat_test.py` | интерполяция и склейка, мягкие упоры, детект упора, удержание по таймауту, свободный ход |
-| `tools/feat2_test.py` | паспорт, счётчики, чёрный ящик, контакт, самотест, защёлка, конфигурация с перезагрузкой, синус |
-| `tools/nogear_test.py` | стенд без редуктора: статика + колесо, шестишаговая против синуса, подбор SINE_OFS/ADV |
-| `tools/lockrotor_test.py` | R обмотки по заблокированному валу |
+| `tools/verify_clone.py` | peripherals after flashing (clocks, timers, UART/DMA, ADC, journal) |
+| `tools/pos_test.py` | loop steps by Goal (stock/v1, `--native` for stock), CSV log |
+| `tools/imp_test.py` | impedance: hold, Kd sweep, full duty under the current ceiling, 1st-order hold, host time, ff |
+| `tools/feat_test.py` | interpolation and splicing, soft limits, stall detection, hold on timeout, coast |
+| `tools/feat2_test.py` | identity record, counters, flight recorder, contact, self-test, latch, config with reboot, sinusoidal |
+| `tools/nogear_test.py` | bench without gearbox: statics + wheel, six-step vs. sinusoidal, SINE_OFS/ADV tuning |
+| `tools/lockrotor_test.py` | winding R with locked shaft |
 
-## Что дальше
-- Слой датчика положения: потенциометр / аналоговый энкодер / MT6701 и AS5600 по I2C (PA10 + PA0), фильтр с переходом 4095→0,
-  счётчик оборотов, компенсация мёртвого хода по двум датчикам (Холлы + энкодер).
-- 360°: снять ограничение 900..2100 мкс в стоковом контуре (импеданс уже без него), кольцевая ошибка есть (CFG 0x04).
-- 48 В: делитель Vbus, лимит оборотов, замены на плате — после железа.
+## Next
+- Position sensor layer: potentiometer / analog encoder / MT6701 and AS5600 over I2C (PA10 + PA0), filter with 4095→0 wrap,
+  turn counter, backlash compensation from two sensors (Halls + encoder).
+- 360°: remove the 900..2100 µs limit in the stock loop (impedance already has none), circular error is available (CFG 0x04).
+- 48 V: Vbus divider, rpm limit, board replacements — after the hardware.

@@ -1,8 +1,8 @@
-// Датчики. v1.2: АЦП запускается от TIM1_OC4 один раз за период ШИМ (синхронно с ШИМ). Сигнал шунта на плате
-// отфильтрован [ИЗМ: синхронная выборка = среднему току шины], поэтому I_BUS измеряется, а ток обмотки = I_BUS/скважность.
-// Аппаратный лимит: аналоговый сторож АЦП (ADC_TR.HT, канал 11) → OCREF_CLR TIM1 через EDU_CFG4 — режет ШИМ до конца
-// периода, пока средний ток шины выше порога. ACMP2 (CPP21 = PF6 против DAC0) из маршрутизации убран: держал
-// OCREF_CLR постоянно, причина не разобрана (см. docs/registers_v1.md).
+// Sensors. v1.2: ADC is triggered by TIM1_OC4 once per PWM period (synchronous with PWM). The shunt signal on the board
+// is filtered [MEAS: synchronous sample = average bus current], so I_BUS is measured, and winding current = I_BUS/duty.
+// Hardware limit: analog ADC watchdog (ADC_TR.HT, channel 11) → TIM1 OCREF_CLR via EDU_CFG4 — cuts PWM until the end
+// of the period while average bus current is above threshold. ACMP2 (CPP21 = PF6 vs DAC0) removed from routing: it held
+// OCREF_CLR permanently, cause not investigated (see docs/registers_v1.md).
 #include "sense.h"
 #include "regs.h"
 #include "board.h"
@@ -14,10 +14,10 @@
 
 volatile uint16_t adc_buf[4];
 int16_t g_present_pos;
-volatile uint16_t g_i_wind_ma;     // ток фазы (обмотки), мА — измерен, если g_i_valid
+volatile uint16_t g_i_wind_ma;     // phase (winding) current, mA — measured if g_i_valid
 volatile uint8_t  g_i_valid;
-volatile uint16_t g_awd_count;     // срабатываний аппаратного лимита (сторож АЦП)
-volatile uint8_t  g_bb_freeze_req; // запрос заморозки чёрного ящика из ISR
+volatile uint16_t g_awd_count;     // hardware limit trips (ADC watchdog)
+volatile uint8_t  g_bb_freeze_req; // flight recorder freeze request from ISR
 
 static uint16_t s_raw;
 static int16_t  s_offset;
@@ -28,15 +28,15 @@ static int32_t  s_max;
 static uint16_t s_thr;
 static uint16_t s_pos_u;
 static int32_t  fb_a, fb_b;
-#define K_LOAD_NUM 323277u     // Present Load = отсчёт × 3.23277 (у стока double 0x4009DCC63F141206)
+#define K_LOAD_NUM 323277u     // Present Load = count × 3.23277 (stock uses double 0x4009DCC63F141206)
 #define K_LOAD_DEN 100000u
-static int32_t  cur_off_x16 = 38 * 16;    // смещение нуля датчика тока в единицах АЦП ×16 (≈ Load 122 / 3.23)
+static int32_t  cur_off_x16 = 38 * 16;    // current sensor zero offset in ADC units ×16 (≈ Load 122 / 3.23)
 static uint16_t i_wind_max;
 static uint8_t  hw_limit_applied;
 
-#define VBUS_MV_NUM        1312u    // 13.12 мВ/отсчёт: 1829 ед ↔ 24.0 В на ЛБП [ИЗМ]
+#define VBUS_MV_NUM        1312u    // 13.12 mV/count: 1829 units ↔ 24.0 V on bench PSU [MEAS]
 #define VBUS_MV_DEN        100u
-#define MA_PER_ADC_COUNT   647u     // ×0.01: 6.47 мА на единицу АЦП шунта (2 мА/ед Load × 3.2328 ед/отсчёт) [ИЗМ]
+#define MA_PER_ADC_COUNT   647u     // ×0.01: 6.47 mA per shunt ADC unit (2 mA/unit Load × 3.2328 units/count) [MEAS]
 
 static uint16_t vbus_mv_from_adc(uint16_t adc)
 {
@@ -44,8 +44,8 @@ static uint16_t vbus_mv_from_adc(uint16_t adc)
     return (uint16_t)(mv > 65535u ? 65535u : mv);
 }
 
-/* DMA АЦП с индекса 0. Обязательно после каждого ADSTP: если стоп пришёлся на середину последовательности из 4 каналов,
-   DMA продолжил бы с индекса k, а АЦП начал бы с канала 1 — кольцо adc_buf сдвинулось бы навсегда (Vbus в «положении») */
+/* ADC DMA from index 0. Mandatory after every ADSTP: if the stop landed mid-sequence of the 4 channels,
+   DMA would continue from index k while ADC restarts from channel 1 — the adc_buf ring would shift forever (Vbus in "position") */
 static void adc_dma_setup(void)
 {
     dma_ch_deinit(DMA_CH_ADC);
@@ -57,7 +57,7 @@ static void adc_dma_setup(void)
     DMA_CFG_H(DMA_CH(DMA_CH_ADC)) = 4u | (4u << 11) | (4u << 7);
 }
 
-static void adc_restart(void)   // после ADSTP: сбросить флаги, DMA заново, ADSTART
+static void adc_restart(void)   // after ADSTP: clear flags, restart DMA, ADSTART
 {
     ADC_ISR = 0x1Fu;
     adc_dma_setup();
@@ -65,19 +65,19 @@ static void adc_restart(void)   // после ADSTP: сбросить флаги
     ADC_CR |= 4u;
 }
 
-/* ---------- АЦП: 4 канала, старт от TIM1_OC4 (группа 3 ADC_EXTCFG), DMA в adc_buf по кругу ---------- */
+/* ---------- ADC: 4 channels, triggered by TIM1_OC4 (group 3 ADC_EXTCFG), circular DMA into adc_buf ---------- */
 void sense_adc_init(void)
 {
-    ADC_CFGR1 = 0x0001u;                         // DMAEN; CONT = 0 — одна последовательность на триггер
-    ADC_EXTCFG = (1u << 30) | 1u;                // EXTSE: группа 3 (EXTSELG3 = 00 → TIM1_OC4), EXTEN = 01 фронт, задержка 0
+    ADC_CFGR1 = 0x0001u;                         // DMAEN; CONT = 0 — one sequence per trigger
+    ADC_EXTCFG = (1u << 30) | 1u;                // EXTSE: group 3 (EXTSELG3 = 00 → TIM1_OC4), EXTEN = 01 rising edge, delay 0
     ADC_TESTCFG = 0xDCu;
     ADC_CFGR2 = 0x8000000u;
     ADC_TRIM = (ADC_TRIM_FACTORY_WORD != 0xFFFFFFFFu) ? ADC_TRIM : 0x440055u;
     cc_pwr_cfg_and(0xFFF0FFFFu);
-    ADC_CFGR2 = (ADC_CFGR2 & ~0xAu) | 2u;        // режим тактирования 5 (как в родной): PLL/2
+    ADC_CFGR2 = (ADC_CFGR2 & ~0xAu) | 2u;        // clock mode 5 (as in stock): PLL/2
     ADC_CHSELR |= (1u << 1) | (1u << 7) | (1u << ADC_CH_CURR) | (1u << 15);
     ADC_SMPR = (ADC_SMPR & ~0x1Fu) | 0x7F7u;
-    ADC_TR = 0x0FFFu << 16;                      // сторож всегда включён: HT = max, пока LIMIT_HW = 0
+    ADC_TR = 0x0FFFu << 16;                      // watchdog always on: HT = max while LIMIT_HW = 0
     ADC_CFGR1 |= ((uint32_t)ADC_CH_CURR << 27) | (1u << 23) | (1u << 22);   // AWDCH = 11, AWDEN, AWDSGL
     ADC_CR |= 1u;
     ADC_TESTCFG &= ~0x7800u;
@@ -86,25 +86,25 @@ void sense_adc_init(void)
     adc_dma_setup();
     sc_dma_req_map(4, 4);
     dma_ch_enable(DMA_CH_ADC, 1);
-    ADC_CR |= 4u;                                // ADSTART: ждёт аппаратный триггер
+    ADC_CR |= 4u;                                // ADSTART: waits for hardware trigger
 
-    // маршрутизация в TIM1: источник OCREF_CLR (сторож АЦП, бит 5 OCCSE) включается только вместе с лимитом —
-    // с HT = 0xFFF выход сторожа почему-то низкий, и при активном низком уровне ШИМ резался бы всегда [ИЗМ]
+    // routing into TIM1: OCREF_CLR source (ADC watchdog, OCCSE bit 5) is enabled only together with the limit —
+    // with HT = 0xFFF the watchdog output is low for some reason, and with active-low polarity PWM would always be cut [MEAS]
     sc_edu_cfg4(1u << 5);
 }
 
-/* пересчёт порогов аппаратного лимита (вызывать, когда меняется REG_LIMIT_HW или смещение) */
+/* recompute hardware limit thresholds (call when REG_LIMIT_HW or the offset changes) */
 static void hw_limit_apply(void)
 {
-    uint8_t lim = regs[REG_LIMIT_HW];                       // ×100 мА
+    uint8_t lim = regs[REG_LIMIT_HW];                       // ×100 mA
     uint32_t off = (uint32_t)(cur_off_x16 >> 4);
-    uint32_t ht = lim ? off + (uint32_t)lim * 100u * 100u / MA_PER_ADC_COUNT : 0x0FFFu;   // единицы АЦП (средний ток шины)
+    uint32_t ht = lim ? off + (uint32_t)lim * 100u * 100u / MA_PER_ADC_COUNT : 0x0FFFu;   // ADC units (average bus current)
     if (ht > 4095u) ht = 4095u;
     ADC_CR |= 0x10u;
     while (ADC_CR & 4u) {
     }
-    // Выход сторожа = уровень «отсчёт внутри окна» [ИЗМ, перебор 4 вариантов]: окно 0..HT, источник OCREF_CLR
-    // активен НИЗКИМ уровнем (TIM1_SP[5] = 1) → ШИМ режется до конца периода, пока ток выше HT.
+    // Watchdog output = "count inside window" level [MEAS, tried 4 variants]: window 0..HT, OCREF_CLR source
+    // is active LOW (TIM1_SP[5] = 1) → PWM is cut until the end of the period while current is above HT.
     ADC_TR = (ht << 16);
     sc_edu_cfg4(lim ? (((1u << 5) << 24) | (1u << 5)) : (1u << 5));
     ADC_ISR = 1u << 7;
@@ -135,7 +135,7 @@ static void feedback_pwm(int32_t pos)
     fb_b = regs[REG_K_CCW] ? regs[REG_K_CCW] : (int32_t)calib.travel;
     if (fb_a <= 0) fb_a = 1;
     if (fb_b <= 0) fb_b = 1;
-    // сток: t = 540 / (K/460·4095·500/600) = 6624/(91·K) на единицу АЦП (точная дробь), усечение как у float
+    // stock: t = 540 / (K/460·4095·500/600) = 6624/(91·K) per ADC unit (exact fraction), truncation as with float
     int32_t out;
     if (pos < 0x801) {
         uint32_t den = 91u * (uint32_t)fb_a;
@@ -149,7 +149,7 @@ static void feedback_pwm(int32_t pos)
 
 void sense_init_calib(void)
 {
-    uint16_t off = reg16(REG_LOAD_OFFSET);          // хранится в единицах Load (совместимость с v1.1)
+    uint16_t off = reg16(REG_LOAD_OFFSET);          // stored in Load units (v1.1 compatibility)
     if (off) cur_off_x16 = (int32_t)((uint32_t)off * 100u / 323u) * 16;
 }
 
@@ -157,7 +157,7 @@ static void blackbox_update(int16_t pos, uint16_t i_bus, uint16_t duty);
 
 void sense_update(void)
 {
-    // положение (как в клоне)
+    // position (as in the clone)
     uint16_t raw = adc_buf[ADC_IDX_POT];
     s_raw = raw;
     s_offset = (int16_t)reg16(REG_POS_OFFSET);
@@ -171,7 +171,7 @@ void sense_update(void)
     }
     feedback_pwm(pos);
 
-    // ток: выборка синхронна с ШИМ → ток фазы; Present Load оставлен в единицах стока (теперь мгновенный, не средний)
+    // current: sampling synchronous with PWM → phase current; Present Load kept in stock units (now instantaneous, not average)
     uint16_t cur = adc_buf[ADC_IDX_CURR];
     s_load = (uint16_t)((uint32_t)cur * K_LOAD_NUM / K_LOAD_DEN);
     set_reg16(REG_PRESENT_LOAD, s_load);
@@ -183,13 +183,13 @@ void sense_update(void)
         s_overload_t = g_ms + 1000u;
     }
     uint16_t duty = motor_duty();
-    if (regs[REG_TORQUE_ENABLE] == 0 || duty == 0) {           // автокалибровка нуля: ключи закрыты, ток через шунт = 0
+    if (regs[REG_TORQUE_ENABLE] == 0 || duty == 0) {           // zero auto-calibration: switches off, shunt current = 0
         cur_off_x16 += ((int32_t)cur * 16 - cur_off_x16) >> 6;
         set_reg16(REG_LOAD_OFFSET, (uint16_t)((uint32_t)(cur_off_x16 >> 4) * 323u / 100u));
     }
     uint32_t off = (uint32_t)(cur_off_x16 >> 4);
-    uint32_t i_bus = (cur > off) ? ((uint32_t)(cur - off) * MA_PER_ADC_COUNT) / 100u : 0u;   // средний ток шины
-    g_i_valid = (uint8_t)(duty >= 80u);                        // ниже 8 % деление на скважность ненадёжно
+    uint32_t i_bus = (cur > off) ? ((uint32_t)(cur - off) * MA_PER_ADC_COUNT) / 100u : 0u;   // average bus current
+    g_i_valid = (uint8_t)(duty >= 80u);                        // below 8 % division by duty is unreliable
     uint32_t i_ph = g_i_valid ? (i_bus * 1024u / duty) : i_bus;
     if (i_ph > i_bus * 12u) i_ph = i_bus * 12u;
     if (i_ph > 30000u) i_ph = 30000u;
@@ -199,7 +199,7 @@ void sense_update(void)
     set_reg16(REG_I_WIND, (uint16_t)i_ph);
     set_reg16(REG_I_WIND_MAX, i_wind_max);
 
-    // аппаратный лимит: применить при смене регистра, учесть срабатывания
+    // hardware limit: apply on register change, count trips
     static uint8_t last_lim = 0xFF;
     if (regs[REG_LIMIT_HW] != last_lim) {
         last_lim = regs[REG_LIMIT_HW];
@@ -211,13 +211,13 @@ void sense_update(void)
         __disable_irq(); g_status |= ST_CUR_LIMIT; __enable_irq();
     }
 
-    // напряжение: оба регистра из одной стендовой калибровки; legacy 0x2A насыщается на 25.5 В
+    // voltage: both registers from the same bench calibration; legacy 0x2A saturates at 25.5 V
     uint16_t vbus_mv = vbus_mv_from_adc(adc_buf[ADC_IDX_VBUS]);
     uint32_t v_01 = ((uint32_t)vbus_mv + 50u) / 100u;
     regs[REG_PRESENT_VOLT] = (uint8_t)(v_01 > 255u ? 255u : v_01);
     set_reg16(REG_VBUS_MV, vbus_mv);
 
-    // телеметрия v1
+    // v1 telemetry
     int32_t sp = g_speed;
     if (sp > 32767) sp = 32767;
     if (sp < -32768) sp = -32768;
@@ -235,7 +235,7 @@ void sense_update(void)
     set_reg16(REG_R_EST, g_r_est_mohm);
     regs[REG_T_EST] = (uint8_t)g_t_est_c;
 
-    // быстрая телеметрия 0x90..0x9F (один SYNC_READ на всех)
+    // fast telemetry 0x90..0x9F (one SYNC_READ for all)
     set_r2_16(R2_TLM_POS, (uint16_t)pos);
     int32_t vc = g_vel_cnt; if (vc > 32767) vc = 32767; if (vc < -32768) vc = -32768;
     set_r2_16(R2_TLM_VEL, (uint16_t)(int16_t)vc);
@@ -246,10 +246,10 @@ void sense_update(void)
     set_r2_16(R2_TLM_DUTY, duty);
     set_r2_32(R2_TLM_TIME, g_ms + g_time_offset);
 
-    // энергия из шины: мВ·мА = мкВт, за 1 мс = нДж; раз в мс (главный цикл крутится чаще)
+    // energy drawn from the bus: mV·mA = µW, over 1 ms = nJ; once per ms (main loop spins faster)
     static uint32_t e_last_ms, e_acc_nj, e_mj;
     if (g_ms != e_last_ms) {
-        uint32_t dt = g_ms - e_last_ms; if (dt > 50u) dt = 50u;   // пропущенные мс (Flash, опрос температуры)
+        uint32_t dt = g_ms - e_last_ms; if (dt > 50u) dt = 50u;   // missed ms (Flash, temperature poll)
         e_last_ms = g_ms;
         e_acc_nj += (uint32_t)vbus_mv * (i_bus > 40000u ? 40000u : i_bus) * dt;
         if (e_acc_nj >= 1000000u) { e_mj += e_acc_nj / 1000000u; e_acc_nj %= 1000000u; }
@@ -258,21 +258,21 @@ void sense_update(void)
     }
     blackbox_update(pos, (uint16_t)(i_bus > 65535u ? 65535u : i_bus), duty);
 
-    // момент на выходе, мН·м: I_wind·Kt·N (Kt из KV, если не задан); знак — направление выхода
+    // output torque, mN·m: I_wind·Kt·N (Kt from KV if not set); sign — output direction
     {
         uint32_t kt = r2_16(R2_KT);
         uint16_t kv = reg16(REG_KV);
-        if (!kt && kv) kt = 9549296u / kv;                              // мкН·м/А = 60/(2π·Kv)
+        if (!kt && kv) kt = 9549296u / kv;                              // µN·m/A = 60/(2π·Kv)
         if (kt > 100000u) kt = 100000u;
-        // честнее: минус трение редуктора (модель Кулон + вязкое из самотеста), оно не доходит до выхода
+        // more honest: minus gearbox friction (Coulomb + viscous model from self-test), it does not reach the output
         uint32_t w = (uint32_t)(g_speed < 0 ? -g_speed : g_speed);
         uint32_t i_fric = r2_16(R2_FRIC_IC) + (w > 20u ? r2_16(R2_FRIC_KV) * w / 1000u : 0u);
         uint32_t i_eff = (uint32_t)g_i_wind_ma > i_fric ? (uint32_t)g_i_wind_ma - i_fric : 0u;
-        uint32_t t_rotor = i_eff * kt / 1000u;                           // мкН·м
-        uint32_t t_out = t_rotor / 100u * r2_16(R2_N_GEAR) / 100u;      // мН·м = мкН·м·N/10/1000
+        uint32_t t_rotor = i_eff * kt / 1000u;                           // µN·m
+        uint32_t t_out = t_rotor / 100u * r2_16(R2_N_GEAR) / 100u;      // mN·m = µN·m·N/10/1000
         int32_t tq = (int32_t)(t_out > 32767u ? 32767u : t_out) * motor_out_sign();
         set_r2_16(R2_TLM_TORQUE, (uint16_t)(int16_t)tq);
-        // SOA: сколько момента доступно сейчас — потолок тока линейно снижается к I_CONT по мере расхода теплового бюджета
+        // SOA: how much torque is available now — current ceiling drops linearly to I_CONT as the thermal budget is spent
         uint32_t ilim = reg16(REG_LIMIT_CURRENT), ic = reg16(REG_I_CONT), pct = 100u;
         if (ilim && ic < ilim) {
             uint32_t th = g_thermal_pct > 100u ? 100u : g_thermal_pct;
@@ -283,7 +283,7 @@ void sense_update(void)
     }
 }
 
-/* ---------- чёрный ящик: кольцо 50 × 8 Б, шаг 5 мс; событие → ещё BB_POST записей и заморозка ---------- */
+/* ---------- flight recorder: ring 50 × 8 B, 5 ms step; event → BB_POST more records and freeze ---------- */
 static uint8_t  bb_ring[BB_N * 8];
 static uint8_t  bb_idx, bb_frozen, bb_post, bb_prev_f;
 static uint16_t bb_count;
@@ -313,7 +313,7 @@ static void blackbox_update(int16_t pos, uint16_t i_bus, uint16_t duty)
     }
     *ctl = bb_frozen;
     set_r2_16(R2_BB_HEAD, bb_count);
-    // окно: страница из 3 записей, от самой старой (bb_idx) к новой; копируем только при новой записи или смене страницы
+    // window: page of 3 records, from oldest (bb_idx) to newest; copy only on a new record or page change
     static uint16_t win_count = 0xFFFF; static uint8_t win_page = 0xFF;
     unsigned page = regs2[R2_BB_PAGE - REGS2_BASE] % (BB_N / BB_PER_PAGE);
     if (win_count == bb_count && win_page == (uint8_t)page) return;
@@ -324,9 +324,9 @@ static void blackbox_update(int16_t pos, uint16_t i_bus, uint16_t duty)
     }
 }
 
-volatile uint16_t g_mcu_temp_raw;   // сырой отсчёт датчика температуры (глобальный: читается по символу через SWD)
+volatile uint16_t g_mcu_temp_raw;   // raw temperature sensor count (global: read by symbol via SWD)
 
-/* ---------- температура кристалла: ADC_IN16 только в одиночном режиме → раз в секунду подменяем последовательность ---------- */
+/* ---------- die temperature: ADC_IN16 only in single mode → once per second swap the sequence ---------- */
 void sense_mcu_temp_poll(void)
 {
     static uint32_t last_ms;
@@ -336,12 +336,12 @@ void sense_mcu_temp_poll(void)
     while (ADC_CR & 4u) {
     }
     uint32_t chsel = ADC_CHSELR, cfgr1 = ADC_CFGR1;
-    ADC_CFGR1 = cfgr1 & ~1u;                           // без DMA, чтобы не сдвинуть кольцо adc_buf
-    ADC_CHSELR = 1u << 17;                             // ST = 1, SV = 0 → датчик температуры
+    ADC_CFGR1 = cfgr1 & ~1u;                           // no DMA, so as not to shift the adc_buf ring
+    ADC_CHSELR = 1u << 17;                             // ST = 1, SV = 0 → temperature sensor
     uint16_t raw = 0;
-    for (int i = 0; i < 2; i++) {                      // первая выборка после включения датчика — прогрев
+    for (int i = 0; i < 2; i++) {                      // first sample after enabling the sensor — warm-up
         ADC_ISR = 0x1Fu;
-        ADC_CR |= 4u;                                  // ждёт триггер TIM1_OC4 (≤ 43 мкс)
+        ADC_CR |= 4u;                                  // waits for TIM1_OC4 trigger (≤ 43 µs)
         uint32_t t0 = micros();
         while (!(ADC_ISR & 0x0Cu) && (micros() - t0) < 500u) {
         }
@@ -354,7 +354,7 @@ void sense_mcu_temp_poll(void)
     ADC_CFGR1 = cfgr1;
     adc_restart();
     g_mcu_temp_raw = raw;
-    // заводская калибровка (servo_01: 26.6 °C ↔ 2018, 105.0 °C ↔ 2544 → +6.7 ед/°C), иначе 5 мВ/°C из даташита
+    // factory calibration (servo_01: 26.6 °C ↔ 2018, 105.0 °C ↔ 2544 → +6.7 units/°C), otherwise 5 mV/°C from the datasheet
     int32_t t1 = (int32_t)INFO_T1_X10, t2 = (int32_t)INFO_T2_X10;
     int32_t a1 = (int32_t)(INFO_VTS1 & 0xFFFu), a2 = (int32_t)(INFO_VTS2 & 0xFFFu);
     int32_t t_x10;

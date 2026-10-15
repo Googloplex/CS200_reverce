@@ -1,5 +1,5 @@
-// Старт приложения. Таблица векторов лежит по 0x08001000 — родной загрузчик Kpower читает отсюда
-// SP/PC и форвардит все прерывания трамплинами (ldr r0,=0x08001040; ldr r0,[r0,#n]; bx r0).
+// Application startup. Vector table at 0x08001000 — stock Kpower bootloader reads
+// SP/PC from here and forwards all interrupts via trampolines (ldr r0,=0x08001040; ldr r0,[r0,#n]; bx r0).
 #include <stdint.h>
 #include <string.h>
 #include "LCM32F037.h"
@@ -56,7 +56,7 @@ const vector_t g_vectors[16 + 32] = {
     0, 0,
     PendSV_Handler,
     SysTick_Handler,
-    /* внешние прерывания, номера как в LCM32F037.h */
+    /* external interrupts, numbers as in LCM32F037.h */
     WWDG_IRQHandler,        // 0
     0,                      // 1
     WT_IRQHandler,          // 2
@@ -91,7 +91,7 @@ const vector_t g_vectors[16 + 32] = {
     DIV_IRQHandler,         // 31
 };
 
-void Default_Handler(void)   // любое необработанное прерывание или отказ → сброс (так делает и родная на HardFault)
+void Default_Handler(void)   // any unhandled interrupt or fault → reset (stock does the same on HardFault)
 {
     __DSB();
     SCB->AIRCR = 0x05FA0004u;
@@ -102,7 +102,7 @@ void Default_Handler(void)   // любое необработанное прер
 
 void Reset_Handler(void)
 {
-    // Приходим сюда из загрузчика: у него могли остаться включённые прерывания, SysTick, DMA.
+    // Entered from the bootloader: it may have left interrupts, SysTick, DMA enabled.
     __disable_irq();
     __set_MSP((uint32_t)&_estack);
     SysTick->CTRL = 0;

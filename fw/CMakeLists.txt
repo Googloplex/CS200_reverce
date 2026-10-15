@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.20)
 
-# Прошивка-клон для Kpower HB200T (MCU LCP037BT32EU8 = LCM32F037, Cortex-M0).
-# Собирается как ПРИЛОЖЕНИЕ с 0x08001000: родной загрузчик Kpower (0x08000000–0x08000FFF)
-# остаётся на месте и форвардит прерывания через таблицу векторов по 0x08001000.
+# Clone firmware for Kpower HB200T (MCU LCP037BT32EU8 = LCM32F037, Cortex-M0).
+# Built as an APPLICATION at 0x08001000: stock Kpower bootloader (0x08000000–0x08000FFF)
+# stays in place and forwards interrupts via the vector table at 0x08001000.
 set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/cmake/arm-none-eabi.cmake" CACHE FILEPATH "")
 project(hb200t_fw C ASM)
 
@@ -40,5 +40,5 @@ add_custom_command(TARGET ${TARGET}.elf POST_BUILD
     COMMAND ${CMAKE_OBJCOPY} -O binary $<TARGET_FILE:${TARGET}.elf> ${TARGET}.bin
     COMMAND ${CMAKE_OBJCOPY} -O ihex   $<TARGET_FILE:${TARGET}.elf> ${TARGET}.hex
     COMMAND ${CMAKE_SIZE} $<TARGET_FILE:${TARGET}.elf>
-    COMMENT "bin/hex + размер"
+    COMMENT "bin/hex + size"
 )

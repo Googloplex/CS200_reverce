@@ -4,33 +4,33 @@
 #include "board.h"
 #include "motor.h"
 
-#define RX_RING     255u          // кольцо приёма (размер блока DMA)
+#define RX_RING     255u          // receive ring (DMA block size)
 #define DMA_CH_RX   0
 #define DMA_CH_TX   1
 
 static uint8_t rx_ring[RX_RING];  // RAM_200000A8
-static uint8_t pkt[128];          // принятый пакет: ID LEN INST params CHK (RAM_200001A7)
-static uint8_t regw[128];         // отложенная запись REG_WRITE (RAM_20000227)
-static uint8_t txb[5 + 128 + 1];  // ответ: FF FF ID LEN ERR params CHK (в родной 127 Б — READ > 122 Б портит таблицу)
+static uint8_t pkt[128];          // received packet: ID LEN INST params CHK (RAM_200001A7)
+static uint8_t regw[128];         // deferred REG_WRITE (RAM_20000227)
+static uint8_t txb[5 + 128 + 1];  // reply: FF FF ID LEN ERR params CHK (stock has 127 B — READ > 122 B corrupts the table)
 
 static int16_t  rx_state;         // RAM_2000005C
-static uint8_t  rx_proto;         // 0 — FF FF (Dynamixel), 1 — FD FD (пакеты загрузчика, пропускаем)
-static int16_t  rx_start;         // индекс байта ID в кольце
-static int16_t  rx_len;           // поле LEN
-static int16_t  rx_idx;           // индекс чтения
-static int16_t  rx_cur;           // индекс записи DMA
+static uint8_t  rx_proto;         // 0 — FF FF (Dynamixel), 1 — FD FD (bootloader packets, skipped)
+static int16_t  rx_start;         // index of ID byte in the ring
+static int16_t  rx_len;           // LEN field
+static int16_t  rx_idx;           // read index
+static int16_t  rx_cur;           // DMA write index
 static uint8_t  my_id;            // RAM_20000049
-static uint8_t  tx_n;             // индекс контрольной суммы в txb (= 5 + число параметров)
-static uint32_t tx_delay_us;      // v1: задержка ответа сверх Return Delay (слот SYNC_READ)
-static uint8_t  force_reply;      // v1: ответить несмотря на широковещательный ID (SYNC_READ)
+static uint8_t  tx_n;             // checksum index in txb (= 5 + number of params)
+static uint32_t tx_delay_us;      // v1: reply delay on top of Return Delay (SYNC_READ slot)
+static uint8_t  force_reply;      // v1: reply despite broadcast ID (SYNC_READ)
 
 volatile uint8_t g_tx_busy, g_save_flag, g_baud_flag, g_boot_flag, g_lock, g_err;
 volatile uint32_t g_last_rx_ms;
-volatile uint8_t g_cmd_new;          // записан блок команды импеданса 0x80..0x8F
+volatile uint8_t g_cmd_new;          // impedance command block 0x80..0x8F written
 volatile uint32_t g_time_offset;     // host_ms − g_ms
 volatile uint8_t g_time_synced;
 
-static unsigned read_any(unsigned addr, uint8_t *dst, unsigned n)   // чтение из regs/regs2 с обрезкой по границам
+static unsigned read_any(unsigned addr, uint8_t *dst, unsigned n)   // read from regs/regs2, clipped to bounds
 {
     unsigned k = 0;
     for (; k < n; k++) {
@@ -50,26 +50,26 @@ void dxl_uart_init(void)
     UART_DMACR(UART1_B) |= 2u;               // TX DMA
     UART_DMACR(UART1_B) |= 1u;               // RX DMA
 
-    // канал 1: память → UART (ответ), прерывание по блоку
+    // channel 1: memory → UART (reply), interrupt on block
     dma_ch_deinit(DMA_CH_TX);
     DMA_CTL_L(DMA_CH(DMA_CH_TX)) |= 1u;      // INT_EN
     DMAC_MASKBLOCK = 0x101u << DMA_CH_TX;
     DMA_SAR(DMA_CH(DMA_CH_TX)) = (uint32_t)txb;
     DMA_DAR(DMA_CH(DMA_CH_TX)) = UART1_B;    // DR
-    DMA_CTL_L(DMA_CH(DMA_CH_TX)) = 0x200181u;// TT_FC=2, DINC=нет, SINC=инкремент, 8 бит, INT_EN
-    DMA_CFG_L(DMA_CH(DMA_CH_TX)) = 2u << 5;  // приоритет 2
+    DMA_CTL_L(DMA_CH(DMA_CH_TX)) = 0x200181u;// TT_FC=2, DINC=no, SINC=increment, 8 bit, INT_EN
+    DMA_CFG_L(DMA_CH(DMA_CH_TX)) = 2u << 5;  // priority 2
     DMA_CFG_H(DMA_CH(DMA_CH_TX)) = 4u | (1u << 11) | (1u << 7);   // DEST_PER = SRC_PER = 1
-    sc_dma_req_map(1, 2);                    // запрос 1 ← UART1 TX
+    sc_dma_req_map(1, 2);                    // request 1 ← UART1 TX
 
-    // канал 0: UART → кольцо 255 Б, автоперезапуск
+    // channel 0: UART → 255 B ring, auto-reload
     dma_ch_deinit(DMA_CH_RX);
     DMA_SAR(DMA_CH(DMA_CH_RX)) = UART1_B;
     DMA_DAR(DMA_CH(DMA_CH_RX)) = (uint32_t)rx_ring;
-    DMA_CTL_L(DMA_CH(DMA_CH_RX)) = 0x200600u;// TT_FC=2, SINC=нет, DINC=инкремент, 8 бит
+    DMA_CTL_L(DMA_CH(DMA_CH_RX)) = 0x200600u;// TT_FC=2, SINC=no, DINC=increment, 8 bit
     DMA_CTL_H(DMA_CH(DMA_CH_RX)) = RX_RING;
-    DMA_CFG_L(DMA_CH(DMA_CH_RX)) = (1u << 30) | (1u << 31) | (3u << 5);   // reload src/dst, приоритет 3
+    DMA_CFG_L(DMA_CH(DMA_CH_RX)) = (1u << 30) | (1u << 31) | (3u << 5);   // reload src/dst, priority 3
     DMA_CFG_H(DMA_CH(DMA_CH_RX)) = 4u;       // DEST_PER = SRC_PER = 0
-    sc_dma_req_map(0, 3);                    // запрос 0 ← UART1 RX
+    sc_dma_req_map(0, 3);                    // request 0 ← UART1 RX
     dma_ch_enable(DMA_CH_RX, 1);
 }
 
@@ -77,14 +77,14 @@ void dxl_uart_setup(void)
 {
     uint32_t baud = 2000000u / ((uint32_t)regs[REG_BAUD] + 1u);
     uint32_t div = baud * 16u;
-    uint32_t clk = SystemCoreClock;          // UART1 тактируется от PCLK = 72 МГц
+    uint32_t clk = SystemCoreClock;          // UART1 clocked from PCLK = 72 MHz
     uint32_t ibrd = clk / div;
     uint32_t fbrd = ((clk - ibrd * div) * 64u + (baud & 0x0FFFFFFFu) * 8u) / div;
 
     UART_CR(UART1_B) = 0;
     UART_IBRD(UART1_B) = ibrd;
     UART_FBRD(UART1_B) = fbrd;
-    UART_LCR_H(UART1_B) |= 0x60u;            // 8 бит, 1 стоп, без чётности
+    UART_LCR_H(UART1_B) |= 0x60u;            // 8 bit, 1 stop, no parity
     UART_CR(UART1_B) |= 0x300u;              // TXE | RXE
     UART_CR(UART1_B) |= 1u;                  // UARTEN
 }
@@ -114,35 +114,35 @@ void DMAC_CH1_2_IRQHandler(void)
     }
 }
 
-void TIM6_DAC_IRQHandler(void)   // задержка ответа истекла
+void TIM6_DAC_IRQHandler(void)   // reply delay expired
 {
     TIM_SR(TIM6_B) &= ~1u;
     tx_start();
 }
 
-/* ---------- запись регистров с побочными эффектами (FUN_080049c8) ---------- */
+/* ---------- register write with side effects (FUN_080049c8) ---------- */
 void dxl_reg_write(uint8_t addr, const uint8_t *data, unsigned n)
 {
     uint8_t cmd_touched = 0;
-    __disable_irq();                                    // TIM14 не должен увидеть полузаписанный u16/блок (≤128 байт — единицы мкс)
+    __disable_irq();                                    // TIM14 must not see a half-written u16/block (≤128 bytes — a few µs)
     for (unsigned i = 0; i < n; i++) {
         unsigned a = (addr + i) & 0xFFu;
-        if (a >= REGS2_BASE) {                          // блок RAM-регистров v1.3+
-            if (a < 0x90) {                             // команда импеданса
+        if (a >= REGS2_BASE) {                          // RAM register block v1.3+
+            if (a < 0x90) {                             // impedance command
                 regs2[a - REGS2_BASE] = data[i];
                 cmd_touched = 1;
             } else if ((a >= R2_SOFT_MIN && a < R2_STATUS2) || a == R2_HOLD_TMAX || a == R2_HOLD_TMAX + 1 || a == R2_BB_CTRL || a == R2_BB_PAGE ||
                        a == R2_CFG2_CMD || (a >= R2_CONTACT_DECEL && a <= R2_CONTACT_DECEL + 1) ||
                        (a >= R2_N_GEAR && a <= R2_KT + 1) || a == R2_SINE_ADV || a == R2_SINE_OFS) {
-                regs2[a - REGS2_BASE] = data[i];        // настройки v1.5 и управление чёрным ящиком
+                regs2[a - REGS2_BASE] = data[i];        // v1.5 settings and flight recorder control
             }
             continue;
         }
         if (a == 10 || a < 3 || a >= 0x60 || (a >= 0x24 && a <= 0x2E) || a == 0x5A || a == 0x5B) {
-            continue;                                   // только чтение
+            continue;                                   // read-only
         }
         regs[a] = data[i];
-        if (a < 0x18) {                                 // EEPROM-часть
+        if (a < 0x18) {                                 // EEPROM area
             if (g_lock == 0) {
                 g_save_flag = 1;
                 if (a == REG_BAUD) {
@@ -174,15 +174,15 @@ void dxl_reg_write(uint8_t addr, const uint8_t *data, unsigned n)
         if (a == REG_LOCK && regs[REG_LOCK] == 1) {
             g_lock = 1;
         }
-        if (a >= 0x50 && a < 0x60) {                   // свои настройки — в журнал
+        if (a >= 0x50 && a < 0x60) {                   // custom settings — to journal
             g_save_flag = 1;
         }
     }
-    if (cmd_touched) g_cmd_new = 1;                     // только после записи всего блока
+    if (cmd_touched) g_cmd_new = 1;                     // only after the whole block is written
     __enable_irq();
 }
 
-/* ---------- обработчики инструкций ---------- */
+/* ---------- instruction handlers ---------- */
 static void inst_ping(void)
 {
     if (pkt[1] != 2) g_err |= DXL_ERR_INSTRUCTION;
@@ -271,7 +271,7 @@ static void inst_sync_write(void)
         return;
     }
     unsigned addr = pkt[3], L = pkt[4];
-    // Отличие от родной: там граница цикла вычислена неверно (pkt[3] − pkt[6] + 1); здесь — по LEN.
+    // Differs from stock: there the loop bound is computed wrong (pkt[3] − pkt[6] + 1); here — from LEN.
     for (unsigned i = 5; i + L <= pkt[1]; i += L + 1) {
         if (pkt[i] == my_id) {
             dxl_reg_write((uint8_t)addr, &pkt[i + 1], L);
@@ -280,7 +280,7 @@ static void inst_sync_write(void)
     }
 }
 
-static void inst_time_sync(void)   // v1.3: FF FF FE 06 0x86 t0 t1 t2 t3 CHK — часы хоста, мс
+static void inst_time_sync(void)   // v1.3: FF FF FE 06 0x86 t0 t1 t2 t3 CHK — host clock, ms
 {
     if (pkt[1] != 6) {
         g_err |= DXL_ERR_INSTRUCTION;
@@ -292,14 +292,14 @@ static void inst_time_sync(void)   // v1.3: FF FF FE 06 0x86 t0 t1 t2 t3 CHK —
     set_r2_32(R2_TIME_OFFSET, g_time_offset);
 }
 
-static void inst_set_id_by_uid(void)   // v1.5: FF FF FE 0F 0x87 uid[12] new_id CHK — ID по серийнику чипа, без доступа к серве
+static void inst_set_id_by_uid(void)   // v1.5: FF FF FE 0F 0x87 uid[12] new_id CHK — ID by chip serial, without physical access to the servo
 {
     if (pkt[1] != 15) {
         g_err |= DXL_ERR_INSTRUCTION;
         return;
     }
     for (unsigned i = 0; i < 12; i++) {
-        if (pkt[3 + i] != regs2[R2_UID - REGS2_BASE + i]) return;   // не наш — молчим
+        if (pkt[3 + i] != regs2[R2_UID - REGS2_BASE + i]) return;   // not ours — stay silent
     }
     if (pkt[15] < 0xFE) {
         regs[REG_ID] = pkt[15];
@@ -308,7 +308,7 @@ static void inst_set_id_by_uid(void)   // v1.5: FF FF FE 0F 0x87 uid[12] new_id 
     force_reply = 1;
 }
 
-static void inst_uid_scan(void)   // v1.5: FF FF FE 02 0x88 CHK — каждая серва отвечает UID[12] в своём слоте (по байтам UID)
+static void inst_uid_scan(void)   // v1.5: FF FF FE 02 0x88 CHK — each servo replies UID[12] in its own slot (by UID bytes)
 {
     const uint8_t *u = &regs2[R2_UID - REGS2_BASE];
     for (unsigned i = 0; i < 12; i++) txb[5 + i] = u[i];
@@ -357,7 +357,7 @@ static void respond(void)   // FUN_08003e50
         txb[3] = (uint8_t)(tx_n - 3);
         txb[4] = g_err;
         txb[tx_n] = dxl_checksum(&txb[2], (unsigned)tx_n - 2u);
-        uint32_t ticks = (uint32_t)regs[REG_RETURN_DELAY] + tx_delay_us / 2u;   // тик TIM6 = 2 мкс
+        uint32_t ticks = (uint32_t)regs[REG_RETURN_DELAY] + tx_delay_us / 2u;   // TIM6 tick = 2 µs
         if (ticks == 0) {
             tx_start();
         } else {
@@ -368,10 +368,10 @@ static void respond(void)   // FUN_08003e50
     }
     tx_delay_us = 0;
     force_reply = 0;
-    my_id = regs[REG_ID];       // смена ID вступает в силу после ответа
+    my_id = regs[REG_ID];       // ID change takes effect after the reply
 }
 
-/* ---------- автомат приёма (FUN_080042fc) ---------- */
+/* ---------- receive state machine (FUN_080042fc) ---------- */
 static int16_t rx_avail(void)
 {
     int16_t cur = (int16_t)(DMA_CTL_H(DMA_CH(DMA_CH_RX)) & 0xFFFu);
@@ -400,7 +400,7 @@ void dxl_poll(void)
         rx_idx++;
         break;
     case 2:
-        if (rx_ring[rx_idx] != hdr) {       // лишние байты заголовка пропускаем
+        if (rx_ring[rx_idx] != hdr) {       // skip extra header bytes
             rx_start = rx_idx;
             rx_state = 3;
         }
@@ -412,14 +412,14 @@ void dxl_poll(void)
         rx_idx++;
         break;
     case 4:
-        if (rx_proto) {                     // у загрузчика длина 16 бит
+        if (rx_proto) {                     // bootloader uses 16-bit length
             uint8_t lo = rx_idx ? rx_ring[rx_idx - 1] : rx_ring[RX_RING - 1];
             rx_len = (int16_t)((rx_ring[rx_idx] << 8) | lo);
         }
         rx_state = 5;
         break;
     default:
-        if (rx_proto) {                     // пакет загрузчика: только пропустить
+        if (rx_proto) {                     // bootloader packet: skip only
             if (rx_avail() < rx_len + 1) return;
             int16_t e = (int16_t)(rx_start + rx_len + 2);
             rx_idx = (e <= 254) ? (int16_t)(e + 1) : (int16_t)(e - 254);
@@ -428,9 +428,9 @@ void dxl_poll(void)
         }
         if (rx_avail() < rx_len) return;
         {
-            int16_t e = (int16_t)(rx_start + rx_len + 1);   // индекс CHK
+            int16_t e = (int16_t)(rx_start + rx_len + 1);   // CHK index
             unsigned total = (unsigned)rx_len + 2u;          // ID LEN INST ... CHK
-            if (total > sizeof pkt) {                        // отличие от родной: пакет длиннее буфера — пропустить
+            if (total > sizeof pkt) {                        // differs from stock: packet longer than buffer — skip
                 rx_idx = (e <= 254) ? (int16_t)(e + 1) : (int16_t)(e - 254);
                 rx_state = 0;
                 break;

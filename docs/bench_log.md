@@ -1,52 +1,54 @@
-# Журнал стендов (servo_01, 24 В, ЛБП; хронология)
+# Bench test log (servo_01, 24 V, bench PSU; chronological)
 
-Все числа — [ИЗМ] на servo_01, если не сказано иначе. Справочник регистров — `docs/registers_v1.md`, мотор — `docs/motor.md`.
+Evidence tags: [MEAS] measured, [DS] datasheet, [SPEC] vendor spec sheet, [HYP] hypothesis.
 
-## 2026-10-15, клон (v0) и v1.1
-- Клон стока прошит, A/B с родной прошивкой на той же серве: ступеньки TL 150/300/600 совпали в пределах 20 мс и ±3 ед
-  (`docs/clone_ab_test.md`, логи `dumps/servo_01/tests/`).
-- v1.1: контроллер стока без регрессии; v1 с трапецией 3000 ед/с, 50000 ед/с² — та же точность ±6 ед, пик тока 0.6 А вместо 2.5 А.
-  Таймаут шины, Vbus max/min, IWDG срабатывают. R_EST онлайн 503 мОм.
-- Скорость ротора ∝ напряжению: ~1025 шаг/с при 7 В, ~2090 при 14 В (TL 300/600). Шагов Холлов на единицу АЦП ≈ 0.22 (с люфтом).
+All numbers are [MEAS] on servo_01 unless stated otherwise. Register reference — `docs/registers_v1.md`, motor — `docs/motor.md`.
 
-## v1.2 — АЦП синхронно с ШИМ, аппаратный лимит
-- Триггер от TIM1_OC4 требует CC4E. Сторож АЦП → OCREF_CLR: при TL 600 пик Load 1100 → 800–870, средний ток 1.1 → 0.6 А;
-  срез за несколько периодов (шунт отфильтрован). Неверная комбинация окна/уровня — разнос (прервано при 6.4 А).
-- Стёртый байт 0x17 журнала включал лимит 0.2 А — позже выяснилось: LIMIT_HW перекрывался с R_REF (перенесён на 0x32).
+## 2026-10-15, clone (v0) and v1.1
+- Stock clone flashed, A/B against stock firmware on the same servo: steps at TL 150/300/600 matched within 20 ms and ±3 units
+  (`docs/clone_ab_test.md`, logs `dumps/servo_01/tests/`).
+- v1.1: stock controller with no regression; v1 with trapezoidal profile 3000 units/s, 50000 units/s² — same accuracy ±6 units, peak current 0.6 A instead of 2.5 A.
+  Bus timeout, Vbus max/min, IWDG trip. Online R_EST 503 mΩ.
+- Rotor speed ∝ voltage: ~1025 steps/s at 7 V, ~2090 at 14 V (TL 300/600). Hall steps per ADC unit ≈ 0.22 (including backlash).
 
-## v1.3–v1.4 — импеданс и момент в амперах (`tools/imp_test.py`)
-- Первые прогоны фактически шли на duty 300: стоковый Torque Limit = 300 из журнала резал выход импеданса.
-- Оценка скорости держала старое значение до 100 мс после остановки → при Kd ≥ 0.15 раскачка на полном duty, 16 А по шине
-  («КЗ» на ЛБП 4 А). Исправлено ограничением 1/(время с фронта).
-- Полный duty с места без потолка: 14.8 А, Vbus до 7.9 В, ЛБП 10 А в защиту, серва обесточивается, SWD падает.
-- Потолок тока по модели (R, Ke·ω, Vbus): ступенька 817 ед при tmax 1000 под 8 А — 14 600 ед/с, 0.12 с, перерег 2–5 ед, ток шины ≤ 3.5 А,
-  Vbus ≥ 21.7 В; под 5 А — 10 600 ед/с, 0.14 с. Kd: 0.02 — перерег 84, не устанавливается; 0.06 — 3–6 ед, 0.12 с; 0.15 — 0 ед, 0.27 с.
-- Измеренный ограничитель: R_EST под быстрыми переходами уплывал 0.5 → 0.18 Ом (ток через фильтр отстаёт от duty) — модель на R_REF,
-  оценка только при ровном duty; замороженный потолок ниже 80 duty — взаимоблокировка, исправлено.
-- Исполнение по времени хоста (+500 мс) — пошла через 0.54 с. ff ±600 мА в покое не виден (14 duty против трения).
+## v1.2 — ADC synchronous with PWM, hardware limit
+- Trigger from TIM1_OC4 requires CC4E. ADC watchdog → OCREF_CLR: at TL 600 peak Load 1100 → 800–870, average current 1.1 → 0.6 A;
+  cut takes several periods (shunt is filtered). Wrong window/level combination — runaway (aborted at 6.4 A).
+- The erased journal byte 0x17 enabled a 0.2 A limit — later found: LIMIT_HW overlapped R_REF (moved to 0x32).
 
-## v1.5 без редуктора (`tools/nogear_test.py`, `tools/lockrotor_test.py`), 14/14
-- Паспорт: UID 37323237343439372e0d98d1, дата чипа 2024-11-10, T_mcu 24 °C (raw 2000–2004). Чёрный ящик, защёлка (1 → 6 → 1),
-  TEST_UNLIMITED, конфигурация после сброса — работают.
-- Колесо, шестишаговая: duty 150 → 440 шаг/с при 200 мА; 300 → 915 шаг/с при 450 мА; Kv ≈ 1475 при pp = 1.
-- Скорость по 6 фронтам: шум 60–170 → 1–10 шаг/с.
-- Синус: 890–895 шаг/с при 487/511 мА против 915 при 450 у шестишаговой; подбор SINE_OFS +6, SINE_ADV +8 (ofs −12 — ток +40 %).
-- Заблокированный вал: duty ±100, 2.32 В, 4.6 А → R = 504–505 мОм (в обе стороны); duty 120 рукой не удержать.
+## v1.3–v1.4 — impedance and torque in amps (`tools/imp_test.py`)
+- The first runs effectively ran at duty 300: stock Torque Limit = 300 from the journal clipped the impedance output.
+- The speed estimate held its old value for up to 100 ms after stopping → at Kd ≥ 0.15 oscillation at full duty, 16 A on the bus
+  ("short circuit" on a 4 A bench PSU). Fixed by bounding with 1/(time since edge).
+- Full duty from standstill without a ceiling: 14.8 A, Vbus down to 7.9 V, 10 A bench PSU trips its protection, servo loses power, SWD drops.
+- Model-based current ceiling (R, Ke·ω, Vbus): step of 817 units at tmax 1000 under 8 A — 14 600 units/s, 0.12 s, overshoot 2–5 units, bus current ≤ 3.5 A,
+  Vbus ≥ 21.7 V; under 5 A — 10 600 units/s, 0.14 s. Kd: 0.02 — overshoot 84, does not settle; 0.06 — 3–6 units, 0.12 s; 0.15 — 0 units, 0.27 s.
+- Measured-current limiter: R_EST drifted 0.5 → 0.18 Ω during fast transients (filtered current lags duty) — model uses R_REF,
+  estimate only at steady duty; frozen ceiling below duty 80 — deadlock, fixed.
+- Execution at host time (+500 ms) — started after 0.54 s. ff ±600 mA at rest not visible (14 duty versus friction).
 
-## v1.5 с редуктором (после ревью: `tools/imp_test.py`, `feat_test.py`, `feat2_test.py`, `pos_test.py`)
-- Сток в целых против старых A/B-логов (TL 300, t90/установление ±15 ед): 1200→2900 379/425 → 382/432 мс, 2900→2000 216/237 → 214/242,
-  2000→1200 189/211 → 217/244 (механика после переборки).
-- imp_test = эталон v1.4 (kd 60: 0 перерег., 0.15 с; 8 А: 12 100 ед/с, 3.1 А, 0.16 с). feat_test 10/10 (интерполяция за 600 мс с S-кривой,
-  склейка без рывка, упоры и пружина, упор → флаг/отказ, таймаут → удержание, свободный ход). feat2_test: счётчики, чёрный ящик,
-  без ложных контактов, защёлка, конфигурация после сброса, синус на ступеньках 97 % скорости.
-- Самотест: направление −1, шаг/ед 195–206, Kv 1466–1481, R из журнала, трение 0.85–0.89 А + 0.32–0.36 мА/(шаг/с), duty страгивания 54–57,
-  мёртвый ход при реверсе 41–43 шага, возврат в точку старта.
-- Редуктор дважды отваливался; при проскальзывании ротор 950 шаг/с при стоящем выходе. После сборки: мёртвый ход при реверсе
-  38–48 шагов Холлов в обе стороны в точках 1500/2050/2600, без реверса 3–5.
+## v1.5 without gearbox (`tools/nogear_test.py`, `tools/lockrotor_test.py`), 14/14
+- Identity record: UID 37323237343439372e0d98d1, chip date 2024-11-10, T_mcu 24 °C (raw 2000–2004). Flight recorder, latch (1 → 6 → 1),
+  TEST_UNLIMITED, config after reset — work.
+- Wheel, six-step: duty 150 → 440 steps/s at 200 mA; 300 → 915 steps/s at 450 mA; Kv ≈ 1475 at pp = 1.
+- Speed from 6 edges: noise 60–170 → 1–10 steps/s.
+- Sinusoidal: 890–895 steps/s at 487/511 mA versus 915 at 450 for six-step; tuned SINE_OFS +6, SINE_ADV +8 (ofs −12 — current +40 %).
+- Locked shaft: duty ±100, 2.32 V, 4.6 A → R = 504–505 mΩ (both directions); duty 120 cannot be held by hand.
 
-## Уроки стенда
-- ЛБП: любой тест с движением — только с LIMIT_CURRENT ≤ 8 А; стоковый Torque Limit 300 в журнале servo_01 режет все контуры — ставить 1000 в RAM.
-- ST-Link: зависший pyOCD flash (пробник занят другой сессией) после убийства процесса роняет ST-Link из USB до переподключения;
-  flash.sh и тесты запускать через `timeout`.
-- Запись регистров по SWD: прошивка может перезаписать байт раньше проверки ST-Link — ловить исключение и проверять чтением.
-- Команда импеданса остаётся активной (mode ≠ 0) до команды mode = 0 — иначе режим колеса/стока не получает управления.
+## v1.5 with gearbox (after review: `tools/imp_test.py`, `feat_test.py`, `feat2_test.py`, `pos_test.py`)
+- Stock in integers versus old A/B logs (TL 300, t90/settling ±15 units): 1200→2900 379/425 → 382/432 ms, 2900→2000 216/237 → 214/242,
+  2000→1200 189/211 → 217/244 (mechanics after rebuild).
+- imp_test = v1.4 reference (kd 60: 0 overshoot, 0.15 s; 8 A: 12 100 units/s, 3.1 A, 0.16 s). feat_test 10/10 (interpolation over 600 ms with S-curve,
+  joining without a jerk, limits and spring, stall → flag/fault, timeout → hold, coast). feat2_test: counters, flight recorder,
+  no false contacts, latch, config after reset, sinusoidal on steps 97 % speed.
+- Self-test: direction −1, steps/unit 195–206, Kv 1466–1481, R from journal, friction 0.85–0.89 A + 0.32–0.36 mA/(step/s), breakaway duty 54–57,
+  backlash on reversal 41–43 steps, return to the start point.
+- The gearbox came apart twice; when slipping the rotor ran at 950 steps/s with the output stationary. After reassembly: backlash on reversal
+  38–48 Hall steps in both directions at points 1500/2050/2600, without reversal 3–5.
+
+## Bench lessons
+- Bench PSU: any test with motion — only with LIMIT_CURRENT ≤ 8 A; stock Torque Limit 300 in the servo_01 journal clips all loops — set 1000 in RAM.
+- ST-Link: a hung pyOCD flash (probe busy with another session), once the process is killed, drops the ST-Link off USB until replugged;
+  run flash.sh and tests via `timeout`.
+- Register writes over SWD: the firmware may overwrite a byte before the ST-Link verify — catch the exception and check by reading back.
+- The impedance command stays active (mode ≠ 0) until a mode = 0 command — otherwise wheel/stock mode gets no control.

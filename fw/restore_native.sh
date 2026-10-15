@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Откат к родному приложению Kpower: из дампа берётся область 0x08001000..0x08007BFF (приложение + пустое место)
-# и прошивается на место. Загрузчик (0x08000000..0x08000FFF) и журнал (0x08007C00..) не трогаются.
-# Использование: ./restore_native.sh [dumps/servo_01/flash.bin]
+# Rollback to stock Kpower application: region 0x08001000..0x08007BFF (application + free space) is taken from the dump
+# and flashed back. Bootloader (0x08000000..0x08000FFF) and journal (0x08007C00..) are untouched.
+# Usage: ./restore_native.sh [dumps/servo_01/flash.bin]
 set -e
 cd "$(dirname "$0")"
 DUMP="${1:-../dumps/servo_01/flash.bin}"

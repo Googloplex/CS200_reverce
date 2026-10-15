@@ -1,101 +1,103 @@
-# Мотор и привод — измерения
+# Motor and drive — measurements
 
-## Сводка (servo_01, 2026-10-15)
-| Параметр | Значение | Как получено |
+Evidence tags: [MEAS] measured, [DS] datasheet, [SPEC] vendor spec sheet, [HYP] hypothesis.
+
+## Summary (servo_01, 2026-10-15)
+| Parameter | Value | How obtained |
 |---|---|---|
-| Пары полюсов | **1** | скорость/напряжение с редуктором и без, сходится с паспортом 0.18 с/60° при 12 В [ИЗМ] |
-| Kv | **1466–1481 об/мин/В** | свободный ротор, самотест [ИЗМ] |
-| R фаза-фаза | **505 мОм** при ~24 °C | заблокированный вал, 4.6 А, обе стороны [ИЗМ] |
-| Передаточное N | ≈ 210–223 | по шагу Холлов на единицу АЦП и ходу 120° [ГИП] |
-| Шагов Холлов на единицу АЦП | **0.206** (установившийся ход) | самотест; 0.22 с учётом мёртвого хода |
-| Трение без нагрузки | 0.85–0.89 А + 0.32–0.36 мА/(шаг/с) | самотест: Кулон + вязкое [ИЗМ] |
-| Duty страгивания | 54–57 | самотест [ИЗМ] |
-| Мёртвый ход при реверсе | **38–48 шагов Холлов ≈ 12° выхода** | толчки после реверса, три точки хода [ИЗМ] |
-| Kt ротора | 6.5 мН·м/А | 60/(2π·Kv) [расчёт] |
-| L обмотки, тепловые постоянные | — | не измерены |
+| Pole pairs | **1** | speed/voltage with and without gearbox, consistent with the spec sheet 0.18 s/60° at 12 V [MEAS] |
+| Kv | **1466–1481 rpm/V** | free rotor, self-test [MEAS] |
+| R phase-to-phase | **505 mΩ** at ~24 °C | locked shaft, 4.6 A, both directions [MEAS] |
+| Gear ratio N | ≈ 210–223 | from Hall steps per ADC unit and 120° travel [HYP] |
+| Hall steps per ADC unit | **0.206** (steady-state travel) | self-test; 0.22 including backlash |
+| No-load friction | 0.85–0.89 A + 0.32–0.36 mA/(step/s) | self-test: Coulomb + viscous [MEAS] |
+| Breakaway duty | 54–57 | self-test [MEAS] |
+| Backlash on reversal | **38–48 Hall steps ≈ 12° at the output** | pushes after reversal, three points of travel [MEAS] |
+| Rotor Kt | 6.5 mN·m/A | 60/(2π·Kv) [calc] |
+| Winding L, thermal constants | — | not measured |
 
-## Холостой ход на родной прошивке (servo_01, 2026-10-15)
-Условия: потенциометр снят (контур положения разомкнут), `tools/spin_native.py 10 300 2100` —
-Torque Limit 300/1023, Goal 2100 мкс, выход без нагрузки, лабораторный БП.
+## No-load run on stock firmware (servo_01, 2026-10-15)
+Conditions: potentiometer removed (position loop open), `tools/spin_native.py 10 300 2100` —
+Torque Limit 300/1023, Goal 2100 µs, output unloaded, bench PSU.
 
-| Параметр | Значение | Уверенность |
+| Parameter | Value | Confidence |
 |---|---|---|
-| Напряжение шины (датчик серво) | 20.7 В без момента → 20.3–20.5 В при работе | [ИЗМ] |
-| Напряжение БП | **24.0 В** (датчик серво при этом 20.7 → занижает в ≈1.16 раза) | [ИЗМ] |
-| Ток от БП при работе | **330–340 мА** (10 с и 20 с прогоны) | [ИЗМ] |
-| Present Load без момента | ~126–135 (смещение нуля датчика тока) | [ИЗМ] |
-| Present Load при работе | ~270–330, кратко до ~400 | [ИЗМ] |
-| Мощность ХХ | ≈ 8.1 Вт (24.0 В × 0.34 А) при TL=300 | расчёт |
-| Колебания тока | волнами ~250 → ~400 → ~250 за несколько секунд (повторялось в 10 с и 20 с прогонах) | [ИЗМ] — механика? |
+| Bus voltage (servo sensor) | 20.7 V without torque → 20.3–20.5 V running | [MEAS] |
+| PSU voltage | **24.0 V** (servo sensor reads 20.7 meanwhile → under-reads by ≈1.16×) | [MEAS] |
+| PSU current while running | **330–340 mA** (10 s and 20 s runs) | [MEAS] |
+| Present Load without torque | ~126–135 (current sensor zero offset) | [MEAS] |
+| Present Load while running | ~270–330, briefly up to ~400 | [MEAS] |
+| No-load power | ≈ 8.1 W (24.0 V × 0.34 A) at TL=300 | calc |
+| Current fluctuations | waves ~250 → ~400 → ~250 over a few seconds (repeated in 10 s and 20 s runs) | [MEAS] — mechanics? |
 
-## Шкала датчика тока [ГИП]
-- Прошивка: Present Load = ADC11 × 3.2327 (double), порог перегрузки 9500 > 1 с.
-- Потребление логики (момент выключен): **12 мА** при 24.0 В [ИЗМ] → мотор на ХХ ≈ 328 мА из шины.
-- Present Load: смещение нуля ~130–140, при работе ~250–330 (среднее ~290) → прирост ~155 ед. ↔ 328 мА среднего тока шины.
-  Гипотеза «Load ≈ мА» **не подтвердилась**. Вероятно, АЦП берёт выборку синхронно с ШИМ (в фазе «ключ открыт») —
-  тогда Load ∝ току фазы, а не среднему току шины (ток фазы ≈ ток шины / скважность). Нужны точки при разных
-  Torque Limit (скважности) и под нагрузкой, чтобы развести эти два варианта.
-- Порог перегрузки 9500 ед. > 1 с — в амперах пока неизвестен.
+## Current sensor scale [HYP]
+- Firmware: Present Load = ADC11 × 3.2327 (double), overload threshold 9500 > 1 s.
+- Logic consumption (torque off): **12 mA** at 24.0 V [MEAS] → motor at no load ≈ 328 mA from the bus.
+- Present Load: zero offset ~130–140, running ~250–330 (average ~290) → increase ~155 units ↔ 328 mA average bus current.
+  The "Load ≈ mA" hypothesis **was not confirmed**. Probably the ADC samples synchronously with PWM (in the "switch on" phase) —
+  then Load ∝ phase current, not average bus current (phase current ≈ bus current / duty). Points at different
+  Torque Limit (duty) and under load are needed to separate the two options.
+- Overload threshold 9500 units > 1 s — in amps still unknown.
 
-### Калибровка по трём прогонам (24.0 В, логика 12 мА вычтена) [ИЗМ]
-| Torque Limit | Ток мотора (БП) | Present Load ср. | Load − 135 | ед./мА |
+### Calibration from three runs (24.0 V, 12 mA logic subtracted) [MEAS]
+| Torque Limit | Motor current (PSU) | Present Load avg | Load − 135 | units/mA |
 |---|---|---|---|---|
-| 150 | ~144 мА | 198 | ~63 | 0.44 |
-| 300 | ~324 мА | 284 | ~149 | 0.46 |
-| 600 | ~488 мА установившийся (БП 500 мА); **пуск — пик >1 А** (с лимитом БП 1 А → просадка → сброс MCU) | ~390 | ~255 | 0.52 |
+| 150 | ~144 mA | 198 | ~63 | 0.44 |
+| 300 | ~324 mA | 284 | ~149 | 0.46 |
+| 600 | ~488 mA steady-state (PSU 500 mA); **start — peak >1 A** (with 1 A PSU limit → sag → MCU reset) | ~390 | ~255 | 0.52 |
 
-→ Present Load ≈ линеен по **среднему току шины**: ≈ **2.0 мА/ед.** (0.44–0.52 ед./мА) сверх смещения ~135 [ГИП, 3 точки].
-Порог перегрузки 9500 ≈ 19 А (по этой шкале). Ток ХХ: 144 → 324 → 488 мА при TL 150/300/600 (≈12 Вт на 600).
-Пусковой бросок тока >2× установившегося — лимит БП ставить с запасом (≥2 А), иначе сброс MCU.
-После сброса MCU поднялся сам, Torque Enable = 0, ошибок нет.
+→ Present Load is ≈ linear in **average bus current**: ≈ **2.0 mA/unit** (0.44–0.52 units/mA) above the ~135 offset [HYP, 3 points].
+Overload threshold 9500 ≈ 19 A (on this scale). No-load current: 144 → 324 → 488 mA at TL 150/300/600 (≈12 W at 600).
+Inrush current >2× steady-state — set the PSU limit with margin (≥2 A), otherwise the MCU resets.
+After the reset the MCU came up on its own, Torque Enable = 0, no errors.
 
-## Холлы, Kv, пары полюсов — прошивка v1 на servo_01 (2026-10-15, 24.0 В, потенциометр на месте) [ИЗМ]
-Логи `dumps/servo_01/tests/pos_clone_tl{300,600}_20261015_08*.csv`, ступеньки по 1.5 с, выборка 20 мс.
+## Halls, Kv, pole pairs — firmware v1 on servo_01 (2026-10-15, 24.0 V, potentiometer in place) [MEAS]
+Logs `dumps/servo_01/tests/pos_clone_tl{300,600}_20261015_08*.csv`, steps of 1.5 s, 20 ms sampling.
 
-| Скважность | U на обмотке (Vbus·D − I·R) | Скорость ротора | Ток обмотки (оценка) |
+| Duty | Winding U (Vbus·D − I·R) | Rotor speed | Winding current (estimate) |
 |---|---|---|---|
-| 29 % (TL 300) | ≈ 6.3–6.4 В | 915–970 шаг Холлов/с | 1.0–1.2 А |
-| 58 % (TL 600) | ≈ 13 В | 1830–1930 шаг/с | 0.9–1.5 А |
+| 29 % (TL 300) | ≈ 6.3–6.4 V | 915–970 Hall steps/s | 1.0–1.2 A |
+| 58 % (TL 600) | ≈ 13 V | 1830–1930 steps/s | 0.9–1.5 A |
 
-- Скорость ∝ напряжению (×2.0 при ×2 U): движение ограничено Kv, а не регулятором.
-- **Шагов Холлов на единицу АЦП потенциометра = 0.222** (373 шага на 1677 ед, повторяется в обе стороны).
-- Kv = скорость / (6·pp) · 60 / U: **pp = 1 → 1420–1520 об/мин/В; pp = 2 → 710–760**.
+- Speed ∝ voltage (×2.0 at ×2 U): motion is limited by Kv, not by the controller.
+- **Hall steps per potentiometer ADC unit = 0.222** (373 steps per 1677 units, repeatable in both directions).
+- Kv = speed / (6·pp) · 60 / U: **pp = 1 → 1420–1520 rpm/V; pp = 2 → 710–760**.
 
-Какая гипотеза верна, решает физический угол хода. Если 1000→2000 мкс = ~100° (120° полного хода, как в паспорте),
-то единиц АЦП на градус 16.8 → шагов на оборот выхода 1340 → **pp = 1, N ≈ 223, Kv ≈ 1470** [ГИП, сильная]:
-- сходится с паспортными 0.18 с/60° при 12 В (у нас 0.11 с/60° при 13 В без нагрузки),
-- сходится со стоповым моментом: Kt = 6.5 мН·м/А × 15 А × 223 × 0.75 ≈ 165 кг·см (паспорт 200),
-- сходится с зубьями по фото при малых шестернях 17T: 55/18 · 60/17 · 85/17 · 70/17 ≈ 222.
-Если же ход 1000→2000 = ~50°, то pp = 2, N ≈ 274. (Число 274 из раннего разбора журнала было байтами
-«версия 0x12, ID 0x01», прочитанными как u16, к N отношения не имеет.)
+Which hypothesis holds is decided by the physical travel angle. If 1000→2000 µs = ~100° (120° full travel, as in the spec sheet),
+then ADC units per degree 16.8 → steps per output revolution 1340 → **pp = 1, N ≈ 223, Kv ≈ 1470** [HYP, strong]:
+- consistent with the spec sheet 0.18 s/60° at 12 V (we have 0.11 s/60° at 13 V without load),
+- consistent with stall torque: Kt = 6.5 mN·m/A × 15 A × 223 × 0.75 ≈ 165 kg·cm (spec sheet 200),
+- consistent with tooth counts from photos with 17T small gears: 55/18 · 60/17 · 85/17 · 70/17 ≈ 222.
+If instead 1000→2000 travel = ~50°, then pp = 2, N ≈ 274. (The number 274 from an early journal analysis was the bytes
+"version 0x12, ID 0x01" read as u16, unrelated to N.)
 
-**Проверить:** угол качалки между 1000 и 2000 мкс транспортиром (`tools/pos_test.py --tl 300 1000 2000`).
+**To check:** rocker arm angle between 1000 and 2000 µs with a protractor (`tools/pos_test.py --tl 300 1000 2000`).
 
-### Стенд без редуктора (2026-10-15, прошивка v1.5, режим колеса) [ИЗМ]
-| duty | U на обмотке | Скорость ротора | Ток шины | Kv (pp = 1) |
+### Bench test without gearbox (2026-10-15, firmware v1.5, wheel mode) [MEAS]
+| duty | Winding U | Rotor speed | Bus current | Kv (pp = 1) |
 |---|---|---|---|---|
-| 150 | 3.5 В | 440 шаг/с (4400 об/мин) | 200 мА | ~1330 |
-| 300 | 7.0 В | 915 шаг/с (9150 об/мин) | 450 мА | ~1475 (с учётом I·R при R 0.5 Ом) |
-Свободный ротор: Kv ≈ 1475 об/мин/В сходится с измерением с редуктором → **pp = 1** [ИЗМ, два независимых стенда].
-Синусоидальная коммутация на том же duty: 97 % скорости, +10 % тока шины; сдвиг Холлов +6° эл.
+| 150 | 3.5 V | 440 steps/s (4400 rpm) | 200 mA | ~1330 |
+| 300 | 7.0 V | 915 steps/s (9150 rpm) | 450 mA | ~1475 (accounting for I·R at R 0.5 Ω) |
+Free rotor: Kv ≈ 1475 rpm/V matches the measurement with gearbox → **pp = 1** [MEAS, two independent bench tests].
+Sinusoidal commutation at the same duty: 97 % speed, +10 % bus current; Hall offset +6° el.
 
-### Заблокированный ротор (2026-10-15, `tools/lockrotor_test.py`) [ИЗМ]
-duty ±100: U = 2.32 В, I_wind = 4.59–4.60 А, ω = 0 → **R фаза-фаза = 504–505 мОм** в обе стороны при ~24 °C
-(онлайн-оценка на ходу 503–512; одна точка на duty 80 в другом секторе дала 534 — другая пара фаз или нелинейность датчика).
-При duty 120 (≈5.6 А, ~36 мН·м на роторе) ротор уже не удержать рукой. R_REF в журнале = 505.
+### Locked rotor (2026-10-15, `tools/lockrotor_test.py`) [MEAS]
+duty ±100: U = 2.32 V, I_wind = 4.59–4.60 A, ω = 0 → **R phase-to-phase = 504–505 mΩ** both directions at ~24 °C
+(online estimate while running 503–512; one point at duty 80 in another sector gave 534 — a different phase pair or sensor nonlinearity).
+At duty 120 (≈5.6 A, ~36 mN·m at the rotor) the rotor can no longer be held by hand. R_REF in the journal = 505.
 
-### Мёртвый ход редуктора (2026-10-15, после двух переборок) [ИЗМ]
-Толчок duty 150 после реверса: ротор проходит **38–48 шагов Холлов (≈7.5 оборота) до сдвига потенциометра на 10 ед**, одинаково в обе
-стороны и в точках 1500/2050/2600; без реверса — 3–5 шагов. При N ≈ 223 это ≈ 12° на выходе, выбирается за ~100 мс.
-Самотест даёт то же число (41–43). Шаг/ед на установившемся ходу 195–206 (прежние 222 включали мёртвый ход).
-Куда именно смотреть: зацепление шестерни потенциометра и посадка редуктора (он дважды отваливался в этот день); сравнить с другой сервой.
-Для робота это люфт выходного звена при смене направления нагрузки — компенсировать можно только по второму датчику (энкодер на выходе).
+### Gearbox backlash (2026-10-15, after two rebuilds) [MEAS]
+Push at duty 150 after reversal: the rotor travels **38–48 Hall steps (≈7.5 revolutions) before the potentiometer moves by 10 units**, the same in both
+directions and at points 1500/2050/2600; without reversal — 3–5 steps. At N ≈ 223 this is ≈ 12° at the output, taken up in ~100 ms.
+Self-test gives the same number (41–43). Steps/unit on steady-state travel 195–206 (the earlier 222 included backlash).
+Where to look: potentiometer gear mesh and gearbox seating (it came apart twice that day); compare with another servo.
+At the output this is backlash whenever the load direction changes — it can only be compensated with a second sensor (encoder on the output).
 
-### Следствия для скорости (при pp = 1, N = 223)
-| Vbus | Холостой ход ротора | Выход | с/60° |
+### Implications for speed (at pp = 1, N = 223)
+| Vbus | Rotor no-load | Output | s/60° |
 |---|---|---|---|
-| 12 В | 17.6 тыс. об/мин | 79 об/мин | 0.13 |
-| 24 В | 35 тыс. | 158 | 0.063 |
-| 48 В | 70 тыс. — ротор столько не выдержит, нужен лимит ~30–35 тыс. | ~150 | ~0.065 |
-Вывод: 48 В не добавляют скорости выхода сверх 24 В, упор в обороты ротора; добавляют момент на скорости.
-Для скорости выхода выше ~150 об/мин нужен другой редуктор, не напряжение.
+| 12 V | 17.6k rpm | 79 rpm | 0.13 |
+| 24 V | 35k | 158 | 0.063 |
+| 48 V | 70k — the rotor will not survive that, limit ~30–35k needed | ~150 | ~0.065 |
+Conclusion: 48 V does not add output speed beyond 24 V, rotor speed is the limit; it adds torque at speed.
+For output speed above ~150 rpm a different gearbox is needed, not voltage.

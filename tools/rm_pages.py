@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""rm_pages.py — печать страниц Reference Manual (текст с иероглифами, извлечён PyMuPDF).
+"""rm_pages.py — print Reference Manual pages (Chinese text, extracted with PyMuPDF).
   py -3.11 tools/rm_pages.py 104-106 195 217-220
-Текст: docs/datasheets/LCM32F037_RM_V7.11.txt (пересоздать: py -3.11 tools/rm_pages.py --extract)
+Text: docs/datasheets/LCM32F037_RM_V7.11.txt (regenerate: py -3.11 tools/rm_pages.py --extract)
 """
 import os
 import re
@@ -20,7 +20,7 @@ def extract():
         for i, page in enumerate(doc):
             f.write(f"\n=== PAGE {i + 1} ===\n")
             f.write(page.get_text())
-    print("страниц:", doc.page_count)
+    print("pages:", doc.page_count)
 
 
 def main():
@@ -34,7 +34,7 @@ def main():
     for arg in sys.argv[1:]:
         a, _, b = arg.partition("-")
         for p in range(int(a), int(b or a) + 1):
-            print(f"----- стр {p} -----")
+            print(f"----- page {p} -----")
             print("\n".join(l for l in pages[p].splitlines() if l.strip() and l.strip() != "杭州领芯微电子有限公司"))
 
 

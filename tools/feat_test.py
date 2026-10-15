@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-feat_test.py — проверка фич v1.5 через SWD на servo_01: кубическая интерполяция цели по метке времени (mode 2),
-склейка интерполяций, мягкие упоры, детект упора, политика отказа (удержание / свободный ход).
+feat_test.py — v1.5 feature check via SWD on servo_01: cubic interpolation of the target by timestamp (mode 2),
+interpolation blending, soft limits, stall detection, failsafe policy (hold / coast).
 
   py -3.11 tools/feat_test.py
 """
@@ -21,7 +21,7 @@ ELF = os.path.join(ROOT, "fw", "build", "hb200t.elf")
 A, B = 2048, 1231
 
 R2 = dict(SOFT_MIN=0x24, SOFT_MAX=0x26, SOFT_KP=0x28, FAULT_MODE=0x29, STALL_DUTY=0x2A, STALL_MS=0x2C, STALL_ACT=0x2D,
-          STATUS2=0x2E, HOLD_TMAX=0x30)   # смещения от 0x80
+          STATUS2=0x2E, HOLD_TMAX=0x30)   # offsets from 0x80
 
 
 def tim1_ccer_addr():
@@ -45,13 +45,13 @@ def main():
                 try:
                     return fn(*a)
                 except (TransferError, ProbeError) as e:
-                    print(f"   SWD: {e} — переподключение {i + 1}")
+                    print(f"   SWD: {e} — reconnect {i + 1}")
                     time.sleep(0.3)
                     try:
                         t.dp.disconnect(); t.dp.connect()
                     except Exception as e2:
                         print("   ", e2)
-            raise RuntimeError("SWD не восстановился")
+            raise RuntimeError("SWD did not recover")
 
         def hb():
             swd(lambda: t.write32(last_rx, t.read32(g_ms)))
@@ -89,11 +89,11 @@ def main():
                 hot = hot + 1 if r["load"] > 6000 else 0
                 if r["pos"] < 150 or r["pos"] > 3950 or hot >= 2:
                     cmd(r["pos"], mode=0); t.write8(regs + 0x18, 0)
-                    raise RuntimeError(f"{label}: стоп, pos={r['pos']} load={r['load']}")
+                    raise RuntimeError(f"{label}: stop, pos={r['pos']} load={r['load']}")
                 time.sleep(every)
             p = [r["pos"] for _, r in rows]
-            print(f"{label:44s} pos {p[0]:5d} → {p[-1]:5d}  vel пик {max(abs(r['vel']) for _, r in rows):5d}  "
-                  f"I пик {max(r['ibus'] for _, r in rows):5d} мА  st2 {' '.join('%02X' % r['st2'] for _, r in rows[::max(1, len(rows) // 8)])}")
+            print(f"{label:44s} pos {p[0]:5d} → {p[-1]:5d}  vel peak {max(abs(r['vel']) for _, r in rows):5d}  "
+                  f"I peak {max(r['ibus'] for _, r in rows):5d} mA  st2 {' '.join('%02X' % r['st2'] for _, r in rows[::max(1, len(rows) // 8)])}")
             return rows
 
         def at_t(rows, tt):
@@ -103,76 +103,76 @@ def main():
         hb(); t.write16(regs + 0x54, 500); t.write16(regs + 0x22, 1000); t.write16(regs + 0x50, 8000)
         ok = []
         try:
-            r0 = rd(); print("старт:", r0)
+            r0 = rd(); print("start:", r0)
             cmd(A); watch(0.6, "0. → A")
 
-            # 1. кубическая интерполяция за 600 мс
+            # 1. cubic interpolation over 600 ms
             cmd(B, mode=2, at=(now16() + 600) & 0xFFFF)
-            rows = watch(0.9, "1. mode 2: A → B за 600 мс")
+            rows = watch(0.9, "1. mode 2: A → B in 600 ms")
             p1, p3, p5, p6 = at_t(rows, 0.1), at_t(rows, 0.3), at_t(rows, 0.5), at_t(rows, 0.65)
             mid = (A + B) // 2
-            print(f"   pos@0.1 {p1}  @0.3 {p3} (середина {mid})  @0.5 {p5}  @0.65 {p6}")
+            print(f"   pos@0.1 {p1}  @0.3 {p3} (midpoint {mid})  @0.5 {p5}  @0.65 {p6}")
             good = abs(p3 - mid) < 80 and abs(p6 - B) < 30 and p1 > A - 200
-            ok.append(("интерполяция: S-кривая, приход к сроку", good))
+            ok.append(("interpolation: S-curve, arrives on time", good))
 
-            # 2. склейка: через 250 мс новая цель A за 500 мс — без рывка
+            # 2. blending: after 250 ms a new target A in 500 ms — no jerk
             cmd(B, mode=2, at=(now16() + 600) & 0xFFFF)
-            cmd(A, mode=2, at=(now16() + 600) & 0xFFFF)   # перезапись в начале — интерполяция от текущей цели
+            cmd(A, mode=2, at=(now16() + 600) & 0xFFFF)   # overwrite at the start — interpolation from the current target
             cmd(B, mode=2, at=(now16() + 600) & 0xFFFF)
             time.sleep(0.25)
             cmd(A, mode=2, at=(now16() + 500) & 0xFFFF)
-            rows = watch(0.8, "2. склейка B→A на ходу")
+            rows = watch(0.8, "2. blending B→A on the fly")
             vmax = max(abs(r["vel"]) for _, r in rows)
-            ok.append(("склейка без рывка (vel пик < 7000, пришла в A)", vmax < 7000 and abs(rows[-1][1]["pos"] - A) < 30))
+            ok.append(("blending without jerk (vel peak < 7000, reached A)", vmax < 7000 and abs(rows[-1][1]["pos"] - A) < 30))
 
-            # 3. мягкие упоры: цель режется, пружина за упором
+            # 3. soft limits: target is clipped, spring beyond the limit
             w16(R2["SOFT_MIN"], 1600); w16(R2["SOFT_MAX"], 2500)
-            cmd(B); rows = watch(0.6, "3a. упор 1600: цель B=1231")
+            cmd(B); rows = watch(0.6, "3a. limit 1600: target B=1231")
             end = rows[-1][1]["pos"]
-            ok.append(("цель обрезана упором (pos ≈ 1600)", abs(end - 1600) < 40))
-            w16(R2["SOFT_MIN"], end + 150)                  # теперь мы за упором → пружина выталкивает
-            rows = watch(0.5, "3b. упор поднят на +150 (пружина)")
+            ok.append(("target clipped by limit (pos ≈ 1600)", abs(end - 1600) < 40))
+            w16(R2["SOFT_MIN"], end + 150)                  # now we are beyond the limit → spring pushes out
+            rows = watch(0.5, "3b. limit raised by +150 (spring)")
             seen_soft = any(r["st2"] & 0x02 for _, r in rows)
-            ok.append(("пружина за упором: флаг и выход к упору", seen_soft and rows[-1][1]["pos"] >= end + 150 - 40))
+            ok.append(("spring beyond limit: flag and move to the limit", seen_soft and rows[-1][1]["pos"] >= end + 150 - 40))
             w16(R2["SOFT_MIN"], 0); w16(R2["SOFT_MAX"], 0)
-            cmd(A); watch(0.5, "3c. упоры сняты → A")
+            cmd(A); watch(0.5, "3c. limits removed → A")
 
-            # 4. детект упора: потолок тока 0.4 А → ротор не едет, контур требует полный duty
+            # 4. stall detection: 0.4 A current ceiling → rotor does not move, loop demands full duty
             t.write16(regs + 0x50, 400); w16(R2["STALL_DUTY"], 300); w8(R2["STALL_MS"], 50); w8(R2["STALL_ACT"], 0)
-            cmd(B); rows = watch(0.4, "4a. упор (ток ≤ 0.4 А), действие 0")
-            ok.append(("флаг упора при стоящем роторе", bool(rows[-1][1]["st2"] & 0x01) and abs(rows[-1][1]["pos"] - A) < 60))
+            cmd(B); rows = watch(0.4, "4a. stall (current ≤ 0.4 A), action 0")
+            ok.append(("stall flag with rotor standing", bool(rows[-1][1]["st2"] & 0x01) and abs(rows[-1][1]["pos"] - A) < 60))
             w8(R2["STALL_ACT"], 2); w8(R2["FAULT_MODE"], 0)
-            cmd(A); cmd(B); rows = watch(0.4, "4b. действие 2 (отказ → момент выкл)")
-            ok.append(("упор → момент выключен", rows[-1][1]["te"] == 0))
+            cmd(A); cmd(B); rows = watch(0.4, "4b. action 2 (fault → torque off)")
+            ok.append(("stall → torque disabled", rows[-1][1]["te"] == 0))
             w16(R2["STALL_DUTY"], 0); w8(R2["STALL_ACT"], 0); t.write16(regs + 0x50, 8000)
-            cmd(A); watch(0.5, "4c. снова → A")
+            cmd(A); watch(0.5, "4c. again → A")
 
-            # 5. политика отказа 2: таймаут шины → удержание в точке
+            # 5. failsafe policy 2: bus timeout → hold in place
             w8(R2["FAULT_MODE"], 2); t.write16(regs + 0x54, 200)
             cmd(B); watch(0.4, "5a. → B")
-            rows = watch(0.5, "5b. без сердцебиения 500 мс", beat=False)
+            rows = watch(0.5, "5b. no heartbeat for 500 ms", beat=False)
             r = rows[-1][1]
-            ok.append(("таймаут шины → удержание (TE=1, флаг hold, стоит)", r["te"] == 1 and bool(r["st2"] & 0x04) and abs(r["pos"] - B) < 40))
+            ok.append(("bus timeout → hold (TE=1, hold flag, standing)", r["te"] == 1 and bool(r["st2"] & 0x04) and abs(r["pos"] - B) < 40))
             t.write8(g_status, 0); hb()
-            cmd(A); rows = watch(0.5, "5c. команда снимает удержание → A")
-            ok.append(("после удержания едет", abs(rows[-1][1]["pos"] - A) < 30))
+            cmd(A); rows = watch(0.5, "5c. command releases hold → A")
+            ok.append(("moves after hold", abs(rows[-1][1]["pos"] - A) < 30))
             t.write16(regs + 0x54, 500)
 
-            # 6. политика 1: свободный ход при выключенном моменте
+            # 6. policy 1: coast with torque off
             w8(R2["FAULT_MODE"], 1); t.write8(regs + 0x18, 0); time.sleep(0.05)
             r = rd(); c = t.read32(ccer)
-            print(f"6a. момент выкл, свободный ход: st2 0x{r['st2']:02X} CCER 0x{c:04X}")
-            ok.append(("свободный ход: флаг и все выходы TIM1 сняты", bool(r["st2"] & 0x10) and (c & 0x555) == 0))
-            cmd(B); rows = watch(0.5, "6b. из свободного хода → B")
+            print(f"6a. torque off, coast: st2 0x{r['st2']:02X} CCER 0x{c:04X}")
+            ok.append(("coast: flag set and all TIM1 outputs off", bool(r["st2"] & 0x10) and (c & 0x555) == 0))
+            cmd(B); rows = watch(0.5, "6b. from coast → B")
             c = t.read32(ccer)
-            ok.append(("коммутация восстановлена, пришла в B", abs(rows[-1][1]["pos"] - B) < 30 and (c & 0x444) == 0x444))
+            ok.append(("commutation restored, reached B", abs(rows[-1][1]["pos"] - B) < 30 and (c & 0x444) == 0x444))
             w8(R2["FAULT_MODE"], 0)
             cmd(A); watch(0.5, "6c. → A")
         finally:
             cmd(rd()["pos"], mode=0); t.write8(regs + 0x18, 0); t.write16(regs + 0x54, tmo_saved)
             w8(R2["FAULT_MODE"], 0); w16(R2["SOFT_MIN"], 0); w16(R2["SOFT_MAX"], 0); w16(R2["STALL_DUTY"], 0)
-            print("момент выключен:", rd())
-            print("\nИТОГ:")
+            print("torque disabled:", rd())
+            print("\nRESULT:")
             for name, g in ok:
                 print(f"  [{'OK' if g else '!!'}] {name}")
 

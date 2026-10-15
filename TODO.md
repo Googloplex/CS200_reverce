@@ -1,42 +1,42 @@
 # TODO
 
-Чеклист проекта. Подробности по планам — [docs/roadmap.md](docs/roadmap.md), по регистрам — [docs/registers_v1.md](docs/registers_v1.md).
+Project checklist. Plan details — [docs/roadmap.md](docs/roadmap.md), registers — [docs/registers_v1.md](docs/registers_v1.md).
 
-## Реверс и клон
-- [x] SWD, дамп Flash/загрузчика/инфо-зоны, карта памяти
-- [x] Разбор родной прошивки: тактирование, TIM1 → предрайвер, Холлы, АЦП, UART+DMA, протокол, журнал, загрузчик
-- [x] Клон под GCC под родным загрузчиком, A/B с родной 1 в 1
-- [ ] Что выдаёт пад F (сейчас — выход ШИМ положения, как в стоке) и что на PA1 (~1.5 В)
-- [ ] Схема усилителя шунта и RC-фильтра (6-выв. SOT рядом с шунтом?) — осциллограф на PF6
+## Reverse engineering and clone
+- [x] SWD, dump of Flash/bootloader/info area, memory map
+- [x] Stock firmware analysis: clocking, TIM1 → predriver, Halls, ADC, UART+DMA, protocol, journal, bootloader
+- [x] GCC clone under the stock bootloader, A/B against stock 1:1
+- [ ] What pad F outputs (currently a position PWM output, as in stock) and what is on PA1 (~1.5 V)
+- [ ] Shunt amplifier and RC filter schematic (6-pin SOT next to the shunt?) — scope on PF6
 
-## Прошивка
-- [x] Холлы как датчик, телеметрия, защиты, IWDG, SYNC_READ
-- [x] Момент в амперах: потолок duty по модели + измерение как страховка, I²t, SOA-процент
-- [x] Команда импеданса, TIME_SYNC, кубическая интерполяция по меткам времени
-- [x] Мягкие упоры, детект упора/контакта, политика отказа, автомат состояний, защёлка, TEST_UNLIMITED
-- [x] Паспорт по UID, ID по UID, температура кристалла, счётчики, чёрный ящик, сохраняемая конфигурация
-- [x] Самотест/идентификация: направление, шаг/ед, Kv, трение, мёртвый ход
-- [x] Синусоидальная коммутация с интерполяцией по Холлам, подбор сдвига и опережения
-- [x] Без soft-float; ревью перед стендом
-- [ ] Слой датчика положения: потенциометр / аналоговый энкодер / MT6701, AS5600 по I2C на PA10 + PA0
-- [ ] 360° и многооборотность: фильтр с переходом 4095 → 0, счётчик оборотов, снятие ограничения 900..2100 мкс в стоковом контуре
-- [ ] Два датчика на редукторе: компенсация мёртвого хода, момент по закрутке, детект столкновения
-- [ ] Контур тока по измерению (CFG_ILOOP) — проверить полосу под нагрузкой
-- [ ] Протокол: CRC16 / Dynamixel 2.0, indirect addressing — по необходимости
-- [ ] Одношунтовый FOC — только после осциллографа на тракте шунта (п. выше)
-- [ ] Ужать: выкинуть контроллер стока и вход ШИМ, когда совместимость перестанет быть нужна (~1.5 КБ)
+## Firmware
+- [x] Halls as a sensor, telemetry, protections, IWDG, SYNC_READ
+- [x] Torque in amperes: model-based duty ceiling + measurement as a safety net, I²t, SOA percentage
+- [x] Impedance command, TIME_SYNC, cubic interpolation by timestamps
+- [x] Soft limits, stall/contact detection, failsafe policy, state machine, latch, TEST_UNLIMITED
+- [x] Identity by UID, ID by UID, die temperature, counters, flight recorder, persistent config
+- [x] Self-test/identification: direction, steps/unit, Kv, friction, backlash
+- [x] Sinusoidal commutation with Hall interpolation, offset and phase advance tuning
+- [x] No soft-float; review before the bench
+- [ ] Position sensor layer: potentiometer / analog encoder / MT6701, AS5600 over I2C on PA10 + PA0
+- [ ] 360° and multi-turn: filter with 4095 → 0 wrap, turn counter, remove the 900..2100 µs limit in the stock loop
+- [ ] Two sensors across the gearbox: backlash compensation, torque from wind-up, collision detection
+- [ ] Measured current loop (CFG_ILOOP) — check bandwidth under load
+- [ ] Protocol: CRC16 / Dynamixel 2.0, indirect addressing — as needed
+- [ ] Single-shunt FOC — only after scoping the shunt path (item above)
+- [ ] Slim down: drop the stock controller and the PWM input once compatibility is no longer needed (~1.5 KB)
 
-## Стенд и измерения
-- [x] pp = 1, Kv ≈ 1475 об/мин/В, R = 505 мОм, трение, duty страгивания
-- [x] Мёртвый ход при реверсе 38–48 шагов Холлов (~12°)
-- [ ] Сравнить мёртвый ход на другой серве (самотест, `ST_BACKLASH`): редуктор или шестерня потенциометра
-- [ ] L обмотки (импульсный тест или RLC-метр), тепловые постоянные под нагрузкой
-- [ ] Двусторонняя шина с ПК: резистор 470 Ом в TX адаптера; SYNC_WRITE/READ на 1–2 Мбит, TIME_SYNC, 0x87/0x88 по проводу
-- [ ] Прямой момент ff под нагрузкой; синус под нагрузкой (плавность момента)
-- [ ] Свободный ход через MOE = 0 + OSSI вместо снятия CCxE — сравнить осциллографом
-- [ ] Самотест и паспорт на нескольких сервах, сводная таблица по партии (`tools/dump_one.py`)
+## Bench and measurements
+- [x] pp = 1, Kv ≈ 1475 rpm/V, R = 505 mΩ, friction, breakaway duty
+- [x] Backlash on reversal 38–48 Hall steps (~12°)
+- [ ] Compare backlash on another servo (self-test, `ST_BACKLASH`): gearbox or potentiometer gear
+- [ ] Winding L (pulse test or RLC meter), thermal time constants under load
+- [ ] Two-way bus with a PC: 470 Ω resistor in the adapter's TX; SYNC_WRITE/READ at 1–2 Mbit, TIME_SYNC, 0x87/0x88 over the wire
+- [ ] Torque feed-forward under load; sinusoidal under load (torque smoothness)
+- [ ] Coast via MOE = 0 + OSSI instead of clearing CCxE — compare on a scope
+- [ ] Self-test and identity on several servos, summary table per batch (`tools/dump_one.py`)
 
-## 48 В
-- [ ] Замены на плате: входной электролит → 63 В, диод buck-а SS34 → SS310, керамика шины → 100 В, TVS на входе — по тесту
-- [ ] Делитель Vbus и калибровка, лимит оборотов ротора, тест 24 → 30 → 36 → 42 → 48 В на серве-жертве
-- [ ] Тормозной ключ на общей шине (рекуперацию однополярный шунт не видит)
+## 48 V
+- [ ] Board changes: input electrolytic → 63 V, buck diode SS34 → SS310, bus ceramics → 100 V, input TVS — by test
+- [ ] Vbus divider and calibration, rotor speed limit, test 24 → 30 → 36 → 42 → 48 V on a sacrificial servo
+- [ ] Brake chopper on the common bus (the unipolar shunt does not see regeneration)

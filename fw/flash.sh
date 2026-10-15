@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Прошивка ПРИЛОЖЕНИЯ (0x08001000..) через pyOCD с алгоритмом из Keil-пака. Загрузчик 0x08000000–0x08000FFF
-# и журнал 0x08007C00–0x08007FFF не трогаются (стираются только сектора под образ).
-# Требования: py -3.11 с pyocd, ST-Link, серва запитана от ЛБП. Перед первой прошивкой — дамп (tools/dump_one.py)!
+# Flashes the APPLICATION (0x08001000..) via pyOCD with the Keil pack algorithm. Bootloader 0x08000000–0x08000FFF
+# and journal 0x08007C00–0x08007FFF are untouched (only sectors under the image are erased).
+# Requires: py -3.11 with pyocd, ST-Link, servo powered from bench PSU. Dump before first flashing (tools/dump_one.py)!
 set -e
 cd "$(dirname "$0")"
 PACK="../docs/datasheets/LCM32F0xx_DFP_0.4.72/zip/Keil.LCM32F0xx_DFP.0.4.72.pack"

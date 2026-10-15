@@ -1,17 +1,19 @@
-# Сравнение клона (fw/) с родной прошивкой на одной серве — servo_01, 2026-10-15
+# Clone (fw/) vs. stock firmware on the same servo — servo_01, 2026-10-15
 
-Условия: servo_01 с потенциометром, выход без нагрузки, ЛБП 24 В (датчик серво показывает 20.6–20.7 В).
-Управление и логирование через SWD (`tools/pos_test.py`, attach, ядро не останавливается): Torque Enable → Goal,
-ступеньки 1500 → 1000 → 2000 → 1500 мкс по 1.5 с, выборка положения и Present Load каждые 20 мс.
-Родная прошивка ставилась `fw/restore_native.sh`, клон возвращён `fw/flash.sh`; журнал всё время seq 14, не менялся.
-Логи: `dumps/servo_01/tests/pos_{clone,native}_tl{150,300,600}_*.csv`.
+Evidence tags: [MEAS] measured, [DS] datasheet, [SPEC] vendor spec sheet, [HYP] hypothesis.
 
-Пересчёт цели в единицы АЦП у обеих прошивок совпал точно: 1000 мкс → 1231, 1500 → 2048, 2000 → 2915
-(регистры 0x4E/0x4F = 110/117, ход 120°).
+Conditions: servo_01 with potentiometer, output unloaded, bench PSU 24 V (servo sensor reads 20.6–20.7 V).
+Control and logging over SWD (`tools/pos_test.py`, attach, core not halted): Torque Enable → Goal,
+steps 1500 → 1000 → 2000 → 1500 µs, 1.5 s each, position and Present Load sampled every 20 ms.
+Stock firmware installed with `fw/restore_native.sh`, clone restored with `fw/flash.sh`; journal stayed at seq 14 throughout.
+Logs: `dumps/servo_01/tests/pos_{clone,native}_tl{150,300,600}_*.csv`.
 
-## Ступеньки: время до 50 % / 90 % хода, конечная ошибка, дрожание удержания [ИЗМ]
+Goal-to-ADC-units conversion matched exactly in both firmwares: 1000 µs → 1231, 1500 → 2048, 2000 → 2915
+(registers 0x4E/0x4F = 110/117, 120° travel).
 
-| TL | Шаг | клон t50/t90, мс | родная t50/t90, мс | клон ошибка | родная ошибка | удержание (клон / родная) |
+## Steps: time to 50 % / 90 % of travel, final error, hold jitter [MEAS]
+
+| TL | Step | clone t50/t90, ms | stock t50/t90, ms | clone error | stock error | hold (clone / stock) |
 |---|---|---|---|---|---|---|
 | 150 | 2048→1231 | 186 / 354 | 180 / 346 | +2 | +3 | ±2 / ±2 |
 | 150 | 1231→2915 | 461 / 784 | 454 / 745 | −5 | −6 | ±0 / ±1 |
@@ -23,20 +25,20 @@
 | 600 | 1231→2915 | 143 / 213 | 141 / 226 | −2 | −2 | ±1 / ±1 |
 | 600 | 2915→2048 | 99 / 125 | 75 / 131 | −2 | −4 | ±2 / ±1 |
 
-Перерегулирование у обеих 0–6 единиц. Средний Present Load за первые 400 мс шага: клон 134–371, родная 137–375,
-разброс между прошивками того же порядка, что между соседними прогонами (выборка 20 мс, 2 мА/ед).
+Overshoot 0–6 units for both. Mean Present Load over the first 400 ms of a step: clone 134–371, stock 137–375;
+the spread between firmwares is of the same order as between consecutive runs (20 ms sampling, 2 mA/unit).
 
-**Вывод:** траектории, конечные точки и токи совпадают в пределах одного интервала выборки (20 мс) и шума
-потенциометра (±3 ед). Контур положения, профиль, коммутация и пересчёт целей воспроизведены 1 в 1.
+**Conclusion:** trajectories, end points and currents match within one sampling interval (20 ms) and potentiometer
+noise (±3 units). Position loop, profile, commutation and goal conversion are reproduced 1:1.
 
-## Что ещё не сравнивалось
-- Обмен по шине (нет UART-адаптера): протокол проверен только чтением кода.
-- Вход ШИМ на PA3.
-- Режим колеса, Punch, compliance margin/slope (в тестах значения по умолчанию 6/32).
-- Поведение при перегрузке (порог 9500 ед > 1 с) и при смене ID/скорости.
+## Not compared yet
+- Bus communication (no UART adapter): protocol verified by code reading only.
+- PWM input on PA3.
+- Wheel mode, Punch, compliance margin/slope (tests used defaults 6/32).
+- Overload behaviour (threshold 9500 units > 1 s) and ID/baud change.
 
-## Наблюдения по ходу
-- Пусковой ток при TL=600 по 20-мс выборкам до ~1080 ед (~1.9 А): лимит ЛБП держать ≥ 2 А.
-- Статическая ошибка ±5 ед при всех TL: P-регулятор с зоной нечувствительности 5 ед (margin) и Punch = 0.
-- Журнал родной прошивки (seq 8–14) показывал Present 1190–1214 при цели 1209–1231: записи делались, видимо,
-  до установления или с другим смещением 0x14; на стенде обе прошивки приходят в цель.
+## Observations
+- Startup current at TL=600 from 20 ms samples up to ~1080 units (~1.9 A): keep bench PSU limit ≥ 2 A.
+- Static error ±5 units at all TL: P controller with a 5-unit deadband (margin) and Punch = 0.
+- Stock firmware journal (seq 8–14) showed Present 1190–1214 at goal 1209–1231: records were apparently taken
+  before settling or with a different 0x14 offset; on the bench both firmwares reach the goal.

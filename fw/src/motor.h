@@ -1,4 +1,4 @@
-// Мотор: TIM1 → предрайвер, коммутация по Холлам, контур положения 1 кГц, вход ШИМ, защиты v1.
+// Motor: TIM1 → predriver, Hall commutation, 1 kHz position loop, PWM input, v1 protections.
 #pragma once
 #include <stdint.h>
 
@@ -8,21 +8,21 @@ void motor_tim14_init(void);
 void motor_tim15_init(void);
 void motor_new_goal(void);
 void motor_stall_check(void);
-uint16_t motor_duty(void);      // текущая скважность 0..1023
-int8_t   motor_out_sign(void);  // знак выхода контура: +1 к росту положения, −1, 0 = нет момента
+uint16_t motor_duty(void);      // current duty 0..1023
+int8_t   motor_out_sign(void);  // loop output sign: +1 toward increasing position, −1, 0 = no torque
 void     motor_selftest_request(void);
-uint16_t motor_pwm_in(void);    // последний импульс на PA3, мкс
+uint16_t motor_pwm_in(void);    // last pulse on PA3, µs
 uint32_t micros(void);
 
-/* Холлы как датчик (v1) */
+/* Halls as a sensor (v1) */
 extern volatile int32_t  g_hall_count;
 extern volatile uint32_t g_hall_period_us;
 extern volatile uint8_t  g_hall_code;
-extern volatile int32_t  g_speed;        // шагов Холлов/с со знаком
-extern volatile uint8_t  g_status;       // флаги ST_*
+extern volatile int32_t  g_speed;        // Hall steps/s, signed
+extern volatile uint8_t  g_status;       // ST_* flags
 extern volatile uint8_t  g_thermal_pct;
-extern volatile uint16_t g_r_est_mohm;   // оценка сопротивления обмотки
-extern volatile int8_t   g_t_est_c;      // оценка температуры обмотки
-extern volatile int32_t  g_vel_cnt;      // скорость ед АЦП/с по Холлам
-extern volatile uint32_t g_odo_steps;    // одометр ротора, шагов Холлов
-extern volatile uint8_t  g_latched;      // защёлкнутый отказ (CFG_LATCH): момент не включить до CFG2_CMD = 3
+extern volatile uint16_t g_r_est_mohm;   // winding resistance estimate
+extern volatile int8_t   g_t_est_c;      // winding temperature estimate
+extern volatile int32_t  g_vel_cnt;      // speed in ADC units/s from Halls
+extern volatile uint32_t g_odo_steps;    // rotor odometer, Hall steps
+extern volatile uint8_t  g_latched;      // latched fault (CFG_LATCH): torque cannot be enabled until CFG2_CMD = 3

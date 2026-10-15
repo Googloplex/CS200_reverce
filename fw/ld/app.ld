@@ -1,5 +1,5 @@
-/* LCM32F037: Flash 32 КБ @0x08000000, SRAM 4 КБ @0x20000000.
- * Приложение живёт с 0x08001000 (после загрузчика Kpower) и до 0x08007A00 (дальше конфигурация v1.5, с 0x08007C00 журнал). */
+/* LCM32F037: Flash 32 KB @0x08000000, SRAM 4 KB @0x20000000.
+ * Application lives from 0x08001000 (after Kpower bootloader) up to 0x08007A00 (then v1.5 config, journal from 0x08007C00). */
 MEMORY
 {
     FLASH (rx)  : ORIGIN = 0x08001000, LENGTH = 0x6A00

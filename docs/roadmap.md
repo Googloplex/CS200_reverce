@@ -1,29 +1,29 @@
-# Куда дальше
+# Where next
 
-Что берём у лучших в нише и что уже есть (v1.5), что в планах.
+What we take from the best in the niche, what is already there (v1.5), what is planned.
 
-## У кого что подсмотрено
-| Кто | Что ценного | Статус у нас |
+## What was borrowed from whom
+| Who | What is valuable | Status here |
 |---|---|---|
-| **moteus (mjbots)** | одна команда на все режимы: position, velocity, max torque, feedforward, kp/kd на лету; каскад до контура тока | команда импеданса есть; контур тока — по модели + медленный интегратор |
-| **MIT Mini Cheetah / CubeMars** | импеданс в одном кадре p, v, Kp, Kd, τ_ff | есть, плюс метки времени и кубическая интерполяция |
-| **Dynamixel Protocol 2.0** | Fast Sync Read, indirect addressing, профили по времени, CRC16 | SYNC_READ со слотами есть; CRC16 и 2.0 — нет |
-| **VESC** | раздельные лимиты (мотор, шина, рекуперация, обороты) с мягким откатом, счётчики энергии | лимиты и откат есть; рекуперацию однополярный шунт не видит |
-| **ODrive / промышленные приводы** | два энкодера на редукторе: момент из закрутки, компенсация люфта | ждёт энкодер на выходе |
-| **CiA 402** | формальный автомат состояний, защёлка отказов | есть (STATE, LATCHED) |
+| **moteus (mjbots)** | one command for all modes: position, velocity, max torque, feedforward, kp/kd on the fly; cascade down to the current loop | impedance command done; current loop — model-based + slow integrator |
+| **MIT Mini Cheetah / CubeMars** | impedance in one frame p, v, Kp, Kd, τ_ff | done, plus timestamps and cubic interpolation |
+| **Dynamixel Protocol 2.0** | Fast Sync Read, indirect addressing, time-based profiles, CRC16 | SYNC_READ with slots done; CRC16 and 2.0 — no |
+| **VESC** | separate limits (motor, bus, regen, rpm) with soft rollback, energy counters | limits and rollback done; the unipolar shunt cannot see regen |
+| **ODrive / industrial drives** | two encoders across the gearbox: torque from wind-up, backlash compensation | waiting for an output encoder |
+| **CiA 402** | formal state machine, fault latch | done (STATE, LATCHED) |
 
-## Следующие шаги
-1. **Магнитный энкодер на выходе** (MT6701 / AS5600): сначала аналоговый выход в канал потенциометра, затем I2C на двух свободных
-   падах. Слой датчика положения с переходом 4095 → 0, счётчик оборотов, 360° и многооборотность.
-2. **Два датчика на редукторе** (Холлы + энкодер): мёртвый ход ≈ 12° при реверсе измерен — компенсировать по разности углов,
-   оценка момента по закрутке, детект столкновения.
-3. **Двусторонняя шина с ПК**: SYNC_WRITE/SYNC_READ на 1–2 Мбит, TIME_SYNC, раздача ID по UID.
-4. **Тепловая модель с якорем**: температура кристалла уже есть; I2C-термодатчик на банке мотора → честный длительный момент
-   как функция времени (SOA-карта).
-5. **48 В**: замены на плате (электролит, диод buck-а, керамика шины), делитель Vbus, лимит оборотов; ключи 60 В → шина ≤ 48 В.
-6. **Одношунтовый FOC** — только после осциллографа на тракте шунта: если RC-фильтр сглаживает импульсы сильнее 1–2 мкс,
-   фазные токи по одному шунту не восстановить. На M0 без FPU это Q15 на регистрах: два окна выборки за период ШИМ,
-   реконструкция по сектору SVPWM, ~40–65 % CPU.
+## Next steps
+1. **Magnetic encoder on the output** (MT6701 / AS5600): first analog output into the potentiometer channel, then I2C on two free
+   pads. Position sensor layer with 4095 → 0 wrap, turn counter, 360° and multi-turn.
+2. **Two sensors across the gearbox** (Halls + encoder): backlash ≈ 12° on reversal is measured — compensate from the angle difference,
+   torque estimate from wind-up, collision detection.
+3. **Bidirectional bus with a PC**: SYNC_WRITE/SYNC_READ at 1–2 Mbit/s, TIME_SYNC, ID assignment by UID.
+4. **Thermal model with an anchor**: die temperature already available; I2C temperature sensor on the motor can → honest continuous torque
+   as a function of time (SOA map).
+5. **48 V**: board replacements (electrolytic, buck diode, bus ceramics), Vbus divider, rpm limit; 60 V MOSFETs → bus ≤ 48 V.
+6. **Single-shunt FOC** — only after scoping the shunt path: if the RC filter smooths pulses by more than 1–2 µs,
+   phase currents cannot be reconstructed from one shunt. On an M0 without FPU this is Q15 in registers: two sampling windows per PWM period,
+   reconstruction by SVPWM sector, ~40–65 % CPU.
 
-## Что сознательно не делаем
-Anti-cogging (редуктор ≈ 1:220 прячет его), второй шунт (плата), ослабление поля (нечего ослаблять при Kv 1475).
+## Deliberately not doing
+Anti-cogging (gearbox ≈ 1:220 hides it), a second shunt (board), field weakening (nothing to weaken at Kv 1475).

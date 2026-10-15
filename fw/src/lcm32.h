@@ -1,12 +1,12 @@
-// Регистры LCM32F037, которые использует прошивка. Смещения — из SVD пака (docs/datasheets/.../LCM32F037.svd).
-// Свои определения вместо структур вендорского заголовка: там есть объединения с неочевидными именами.
+// LCM32F037 registers used by the firmware. Offsets from the pack SVD (docs/datasheets/.../LCM32F037.svd).
+// Own definitions instead of vendor header structs: those contain unions with non-obvious names.
 #pragma once
 #include <stdint.h>
 #include "LCM32F037.h"   // IRQn_Type, core_cm0.h (NVIC, SysTick, SCB)
 
 #define REG32(base, off) (*(volatile uint32_t *)((uintptr_t)(base) + (off)))
 
-/* ---------------- CHIPCTRL 0x40017000: тактирование, питание ---------------- */
+/* ---------------- CHIPCTRL 0x40017000: clocking, power ---------------- */
 #define CC_BASE        0x40017000u
 #define CC_CLK_CFG     REG32(CC_BASE, 0x00)   // clk_SRC_SEL[21:20] RCH_EN[19] OSCH_EN[17] PLL_EN[16] APB1_DIV[15:12] APB0_DIV[11:8] SYS_CLK_SEL[7:0]
 #define CC_PWR_CFG     REG32(CC_BASE, 0x04)
@@ -14,18 +14,18 @@
 #define CC_PLL_CFG     REG32(CC_BASE, 0x0C)   // PLL_OD[12] PLL_DM[9:8] PLL_DN[6:2] PLL_LS[1] PLL_SRC[0]
 #define CC_OSCH_CFG    REG32(CC_BASE, 0x14)
 #define CC_STS         REG32(CC_BASE, 0x18)   // SYS_CLK_LOCK[22] PLL_LOCK[20] OSCH_STB[19]
-#define CC_KEY         REG32(CC_BASE, 0x20)   // ключ записи
+#define CC_KEY         REG32(CC_BASE, 0x20)   // write key
 #define CC_BDCR        REG32(CC_BASE, 0x28)
 #define CC_UNLOCK_KEY  0x87214365u
 
-/* ---------------- SYSCTRL 0x48007000: клоки периферии, маршрутизация ---------------- */
+/* ---------------- SYSCTRL 0x48007000: peripheral clocks, routing ---------------- */
 #define SC_BASE        0x48007000u
 #define SC_CLKEN0      REG32(SC_BASE, 0x00)
 #define SC_CLKEN1      REG32(SC_BASE, 0x04)
 #define SC_CLKEN2      REG32(SC_BASE, 0x08)
-#define SC_DBG_CFG     REG32(SC_BASE, 0x14)   // *_STOP: остановка таймеров/сторожей при остановке ядра отладчиком
+#define SC_DBG_CFG     REG32(SC_BASE, 0x14)   // *_STOP: stop timers/watchdogs while core is halted by debugger
 #define SC_EDU_CFG4    REG32(SC_BASE, 0x30)   // TIM1: OCCSE[29:24] (OCREF_CLR: ADC_AWD,TIM15,TIM3,ACMP2,ACMP1,ACMP0), BKSE[14:8], SP[6:0]
-#define SC_EDU_CFG0    REG32(SC_BASE, 0x20)   // DMA_REQn_MAP — по 4 бита на линию запроса
+#define SC_EDU_CFG0    REG32(SC_BASE, 0x20)   // DMA_REQn_MAP — 4 bits per request line
 #define SC_KEY         REG32(SC_BASE, 0x7C)
 #define SC_UNLOCK_KEY  0x05FA659Au
 
@@ -50,19 +50,19 @@
 #define GPIOA_B        0x48000000u
 #define GPIOB_B        0x48000200u
 #define GPIOF_B        0x48000A00u
-#define GPIO_MODER(p)   REG32(p, 0x00)   // 2 бита на пин: 0 вход, 1 выход, 2 AF, 3 аналог
-#define GPIO_OD_BSRR(p) REG32(p, 0x04)   // open-drain: бит n — установить, бит n+16 — сбросить
+#define GPIO_MODER(p)   REG32(p, 0x00)   // 2 bits per pin: 0 input, 1 output, 2 AF, 3 analog
+#define GPIO_OD_BSRR(p) REG32(p, 0x04)   // open-drain: bit n — set, bit n+16 — clear
 #define GPIO_SR_BSRR(p) REG32(p, 0x08)   // slew rate
-#define GPIO_PU_BSRR(p) REG32(p, 0x0C)   // подтяжка вверх
-#define GPIO_PD_BSRR(p) REG32(p, 0x10)   // подтяжка вниз
+#define GPIO_PU_BSRR(p) REG32(p, 0x0C)   // pull-up
+#define GPIO_PD_BSRR(p) REG32(p, 0x10)   // pull-down
 #define GPIO_IDR(p)     REG32(p, 0x14)
 #define GPIO_ODR(p)     REG32(p, 0x18)
 #define GPIO_BSRR(p)    REG32(p, 0x1C)
-#define GPIO_AFRL(p)    REG32(p, 0x24)   // ВНИМАНИЕ: у LCM32 AFRL по 0x24, AFRH по 0x28 (не как у STM32)
+#define GPIO_AFRL(p)    REG32(p, 0x24)   // NOTE: on LCM32 AFRL is at 0x24, AFRH at 0x28 (unlike STM32)
 #define GPIO_AFRH(p)    REG32(p, 0x28)
 #define GPIO_OS_BSRR(p) REG32(p, 0x38)   // open-source
 
-/* ---------------- Таймеры (STM32-подобные) ---------------- */
+/* ---------------- Timers (STM32-like) ---------------- */
 #define TIM1_B         0x40010000u
 #define TIM6_B         0x40009000u
 #define TIM14_B        0x4000A000u
@@ -106,7 +106,7 @@
 #define DMA_DAR(c)       REG32(c, 0x08)
 #define DMA_LLP(c)       REG32(c, 0x10)
 #define DMA_CTL_L(c)     REG32(c, 0x18)   // INT_EN[0] DST_W[3:1] SRC_W[6:4] DINC[8:7] SINC[10:9] DMS[13:11] SMS[16:14] TT_FC[22:20]
-#define DMA_CTL_H(c)     REG32(c, 0x1C)   // BLOCK_TS[11:0]; при чтении во время обмена — сколько уже передано
+#define DMA_CTL_H(c)     REG32(c, 0x1C)   // BLOCK_TS[11:0]; read during transfer — amount already transferred
 #define DMA_CFG_L(c)     REG32(c, 0x40)   // CH_PRIOR[7:5] RELOAD_SRC[30] RELOAD_DST[31]
 #define DMA_CFG_H(c)     REG32(c, 0x44)   // FIFO_MODE[1] SRC_PER[10:7] DEST_PER[14:11]
 #define DMAC_RAWTFR      REG32(DMAC_B, 0x2C0)
@@ -118,7 +118,7 @@
 #define DMAC_CLEARDST    REG32(DMAC_B, 0x350)
 #define DMAC_CLEARERR    REG32(DMAC_B, 0x358)
 #define DMAC_CFG         REG32(DMAC_B, 0x398)
-#define DMAC_CHEN        REG32(DMAC_B, 0x3A0)   // бит n — состояние, бит n+8 — разрешение записи
+#define DMAC_CHEN        REG32(DMAC_B, 0x3A0)   // bit n — state, bit n+8 — write enable
 
 /* ---------------- ADC 0x4001A000 ---------------- */
 #define ADC_B          0x4001A000u
@@ -130,19 +130,19 @@
 #define ADC_CHSELR     REG32(ADC_B, 0x1C)
 #define ADC_DR_ADDR    (ADC_B + 0x20u)
 #define ADC_IER        REG32(ADC_B, 0x04)
-#define ADC_TR         REG32(ADC_B, 0x18)   // HT[27:16] LT[11:0] — пороги аналогового сторожа
+#define ADC_TR         REG32(ADC_B, 0x18)   // HT[27:16] LT[11:0] — analog watchdog thresholds
 #define ADC_TRIM       REG32(ADC_B, 0x24)
 #define ADC_EXTCFG     REG32(ADC_B, 0x28)
 #define ADC_TESTCFG    REG32(ADC_B, 0x2C)
-#define ADC_TRIM_FACTORY_WORD  (*(volatile uint32_t *)0x1FFFF5ECu)   // если не FF — TRIM уже загружен из инфо-зоны
+#define ADC_TRIM_FACTORY_WORD  (*(volatile uint32_t *)0x1FFFF5ECu)   // if not FF — TRIM already loaded from info area
 
-/* ---------------- ANACTRL 0x40017C00: компараторы, DAC ---------------- */
+/* ---------------- ANACTRL 0x40017C00: comparators, DAC ---------------- */
 #define ANA_B          0x40017C00u
 #define ACMP2_CSR      REG32(ANA_B, 0x28)   // CP_EN[0] CP_FREN[1] CP_HYSEN[2] CP_IS[3] CP_FS[8] CP_DLY[10:9] CP_BLANKING[14:12] CP_PF[20:16]
 #define ACMP2_MUXCR    REG32(ANA_B, 0xD0)   // N_AMUX[25:24]: 00=DAC0, P_AMUX[17:16]: 01=CPP21 (PF6)
 #define DAC0_CR        REG32(ANA_B, 0x40)   // EN[0] TEN[2:1] TSEL[5:3] VREF_SEL[14]
-#define DAC0_DHR       REG32(ANA_B, 0x48)   // 10 бит, VDDA
-#define ANA_CSR        REG32(ANA_B, 0xF8)   // DAC0_BUF_EN[4] — буфер на PA4 держать выключенным (PA4 = Холл A)
+#define DAC0_DHR       REG32(ANA_B, 0x48)   // 10 bit, VDDA
+#define ANA_CSR        REG32(ANA_B, 0xF8)   // DAC0_BUF_EN[4] — keep buffer on PA4 disabled (PA4 = Hall A)
 
 /* ---------------- EXTI 0x40011000 ---------------- */
 #define EXTI_B         0x40011000u
@@ -152,7 +152,7 @@
 #define EXTI_FTSR      REG32(EXTI_B, 0x0C)
 #define EXTI_PR        REG32(EXTI_B, 0x14)
 
-/* ---------------- IWDG 0x40017400 (STM32-подобный: KR/PR/RLR/SR) ---------------- */
+/* ---------------- IWDG 0x40017400 (STM32-like: KR/PR/RLR/SR) ---------------- */
 #define IWDG_B         0x40017400u
 #define IWDG_KR        REG32(IWDG_B, 0x00)
 #define IWDG_PR        REG32(IWDG_B, 0x04)

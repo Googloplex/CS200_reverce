@@ -6,10 +6,10 @@ uint8_t regs[REGS_SIZE];
 uint8_t regs2[REGS2_SIZE];
 calib_t calib;
 
-/* ---------- журнал: 2 сектора по 512 Б × 4 записи по 128 Б ---------- */
+/* ---------- journal: 2 sectors of 512 B × 4 records of 128 B ---------- */
 static const uint32_t journal_sector[2] = { 0x08007C00u, 0x08007E00u };
 static int32_t  j_seq;      // RAM_20000064
-static uint16_t j_slot;     // смещение записи внутри сектора (0, 0x80, 0x100, 0x180)
+static uint16_t j_slot;     // record offset within sector (0, 0x80, 0x100, 0x180)
 static uint8_t  j_sector;   // 0/1
 static uint8_t  j_found;
 
@@ -22,7 +22,7 @@ uint8_t dxl_checksum(const uint8_t *p, unsigned n)
     return (uint8_t)~s;
 }
 
-/* ---------- заводские настройки ---------- */
+/* ---------- factory defaults ---------- */
 static void calib_from_travel(void)   // FUN_08003a28
 {
     calib.travel = reg16(REG_TRAVEL);
@@ -56,7 +56,7 @@ void regs_factory_defaults(void)
     calib_from_travel();
     set_reg16(REG_PWM_MIN, 900);
     set_reg16(REG_PWM_MAX, 2100);
-    // v1: защиты по умолчанию выключены, смещение тока — автокалибровка
+    // v1: protections off by default, current offset — auto-calibration
     set_reg16(REG_LIMIT_CURRENT, 0);
     set_reg16(REG_LIMIT_SPEED, 0);
     set_reg16(REG_BUS_TIMEOUT, 0);
@@ -95,7 +95,7 @@ void regs_ram_reset(void)
     regs[0x30] = 0; regs[0x31] = 0;                 // Punch
 }
 
-/* пересчёт калибровки по регистрам при старте (FUN_08003908) */
+/* recompute calibration from registers at startup (FUN_08003908) */
 void calib_from_regs(void)
 {
     calib.r46 = (int16_t)reg16(REG_46);
@@ -107,11 +107,11 @@ void calib_from_regs(void)
     calib.pwm_max = (int16_t)reg16(REG_PWM_MAX);
     int32_t span = (int32_t)calib.pwm_max - (int32_t)calib.pwm_min;
     int32_t c = (int32_t)(uint16_t)reg16(REG_PWM_CENTER) - (int32_t)calib.pwm_min;
-    calib.center = (uint16_t)(span > 0 ? c * 4095 / span : 2048);   // (center − min)·4095/span, усечение как у float
+    calib.center = (uint16_t)(span > 0 ? c * 4095 / span : 2048);   // (center − min)·4095/span, truncation as with float
 }
 
 /* ---------- Flash ---------- */
-static int flash_status(void)   // 1 занято, 2 ошибка программирования, 3 ошибка защиты, 4 готово
+static int flash_status(void)   // 1 busy, 2 program error, 3 protection error, 4 ready
 {
     uint32_t sr = FLASH_SR;
     if (sr & 1u) return 1;
@@ -164,7 +164,7 @@ static int flash_program_u16(uint32_t addr, uint16_t data)
     return st;
 }
 
-/* ---------- журнал ---------- */
+/* ---------- journal ---------- */
 void journal_load(void)
 {
     for (unsigned s = 0; s < 2; s++) {
@@ -189,24 +189,24 @@ void journal_load(void)
     } else {
         memcpy(regs, (const void *)(journal_sector[j_sector] + j_slot), REGS_SIZE);
     }
-    uint8_t saved_by = regs[REG_FW_VER];            // версия прошивки, сохранившей запись
+    uint8_t saved_by = regs[REG_FW_VER];            // firmware version that saved the record
     regs_ram_reset();
     regs[REG_33] = 0x12;
     set_r2_16(R2_CMD_KP, 310);
-    set_r2_16(R2_CMD_KD, 60);          // стенд: 60 — без перерегулирования, установление 0.12 с
+    set_r2_16(R2_CMD_KD, 60);          // bench test: 60 — no overshoot, settling 0.12 s
     set_r2_16(R2_CMD_TMAX, 1023);
     regs2[R2_SOFT_KP - REGS2_BASE] = 50;
     regs2[R2_STALL_MS - REGS2_BASE] = 50;
     set_r2_16(R2_HOLD_TMAX, 300);
     set_r2_16(R2_N_GEAR, 2230);
-    regs2[R2_SINE_OFS - REGS2_BASE] = 6;   // стенд servo_01 без редуктора: минимум тока и симметрия направлений
+    regs2[R2_SINE_OFS - REGS2_BASE] = 6;   // bench test servo_01 without gearbox: minimum current and direction symmetry
     regs2[R2_SINE_ADV - REGS2_BASE] = 8;
     cfg2_load();
     for (unsigned i = 0; i < 12; i++) regs2[R2_UID - REGS2_BASE + i] = INFO_UID[i];
-    if (saved_by < 0x24) regs[REG_LIMIT_HW] = 0;     // поле переехало на 0x32 в v1.4 (на 0x17 перекрывалось с R_REF)
-    // v1: значения для записей, сделанных стоком (там нули)
+    if (saved_by < 0x24) regs[REG_LIMIT_HW] = 0;     // field moved to 0x32 in v1.4 (at 0x17 it overlapped R_REF)
+    // v1: values for records written by stock (zeros there)
     if (regs[REG_STEPS_PER_CNT] == 0) regs[REG_STEPS_PER_CNT] = 222;
-    if (reg16(REG_R_REF) < 200 || reg16(REG_R_REF) > 3000) set_reg16(REG_R_REF, 550);   // в старых записях испорчено перекрытием с 0x17
+    if (reg16(REG_R_REF) < 200 || reg16(REG_R_REF) > 3000) set_reg16(REG_R_REF, 550);   // corrupted by overlap with 0x17 in old records
     if (reg16(REG_KV) == 0) set_reg16(REG_KV, 1470);
     if (regs[REG_PP] == 0) regs[REG_PP] = 1;
     if (regs[REG_KP] == 0) regs[REG_KP] = 31;
@@ -221,9 +221,9 @@ void journal_save(uint8_t boot_flag)
     regs[0x7F] = 'K';
     flash_unlock();
     while (1) {
-        FLASH_SR = 0x34u;                       // сброс флагов
+        FLASH_SR = 0x34u;                       // clear flags
         j_slot = (uint16_t)(j_slot + 0x80u);
-        if ((j_slot & 0x1FFu) == 0) {           // сектор заполнен — переходим в другой и стираем его
+        if ((j_slot & 0x1FFu) == 0) {           // sector full — switch to the other one and erase it
             j_slot = 0;
             j_sector = (uint8_t)(j_sector == 0);
             flash_erase_page(journal_sector[j_sector]);
@@ -236,7 +236,7 @@ void journal_save(uint8_t boot_flag)
             }
         }
         if (i < 0x7E) {
-            continue;                           // ошибка — пробуем следующий слот
+            continue;                           // error — try next slot
         }
         uint8_t chk = dxl_checksum((const uint8_t *)base, 0x7E);
         regs[0x7E] = chk;
@@ -247,11 +247,11 @@ void journal_save(uint8_t boot_flag)
     }
 }
 
-/* ---------- конфигурация v1.5 (regs2) во Flash: сектор 0x08007A00, 16 слотов по 32 Б ---------- */
+/* ---------- v1.5 config (regs2) in Flash: sector 0x08007A00, 16 slots of 32 B ---------- */
 #define CFG2_SECTOR 0x08007A00u
 #define CFG2_SLOT   32u
 #define CFG2_PAYLOAD 24u
-static const uint8_t cfg2_map[][2] = {   // {адрес regs2, длина}
+static const uint8_t cfg2_map[][2] = {   // {regs2 address, length}
     {R2_SOFT_MIN, 2}, {R2_SOFT_MAX, 2}, {R2_SOFT_KP, 1}, {R2_FAULT_MODE, 1}, {R2_STALL_DUTY, 2}, {R2_STALL_MS, 1},
     {R2_STALL_ACT, 1}, {R2_HOLD_TMAX, 2}, {R2_CONTACT_DECEL, 2}, {R2_N_GEAR, 2}, {R2_KT, 2}, {R2_SINE_ADV, 1}, {R2_SINE_OFS, 1},
 };
@@ -268,7 +268,7 @@ void cfg2_load(void)
     }
     if (cfg2_slot < 0) return;
     const uint8_t *r = (const uint8_t *)(CFG2_SECTOR + (unsigned)cfg2_slot * CFG2_SLOT);
-    unsigned k = 4, n = r[3] > CFG2_PAYLOAD ? CFG2_PAYLOAD : r[3];   // запись старее карты — хвост остаётся по умолчанию
+    unsigned k = 4, n = r[3] > CFG2_PAYLOAD ? CFG2_PAYLOAD : r[3];   // record older than map — tail stays at defaults
     for (unsigned m = 0; m < sizeof(cfg2_map) / 2; m++) {
         if (k + cfg2_map[m][1] > 4u + n) break;
         for (unsigned j = 0; j < cfg2_map[m][1]; j++) regs2[cfg2_map[m][0] - REGS2_BASE + j] = r[k++];
@@ -281,7 +281,7 @@ void cfg2_save(void)
     for (unsigned i = 0; i < CFG2_SLOT; i++) rec[i] = 0xFF;
     unsigned used = 0;
     for (unsigned m = 0; m < sizeof(cfg2_map) / 2; m++) used += cfg2_map[m][1];
-    rec[0] = 'C'; rec[1] = '2'; rec[2] = 1; rec[3] = (uint8_t)used;   // фактическая длина карты
+    rec[0] = 'C'; rec[1] = '2'; rec[2] = 1; rec[3] = (uint8_t)used;   // actual map length
     unsigned k = 4;
     for (unsigned m = 0; m < sizeof(cfg2_map) / 2; m++) {
         for (unsigned j = 0; j < cfg2_map[m][1]; j++) rec[k++] = regs2[cfg2_map[m][0] - REGS2_BASE + j];
@@ -294,7 +294,7 @@ void cfg2_save(void)
         FLASH_SR = 0x34u;
         int slot = cfg2_slot + 1;
         uint32_t base = CFG2_SECTOR + (uint32_t)slot * CFG2_SLOT;
-        if (slot >= (int)(512u / CFG2_SLOT) || *(const volatile uint32_t *)base != 0xFFFFFFFFu) {   // конец или слот не пуст (чужие данные)
+        if (slot >= (int)(512u / CFG2_SLOT) || *(const volatile uint32_t *)base != 0xFFFFFFFFu) {   // end, or slot not empty (foreign data)
             flash_erase_page(CFG2_SECTOR);
             slot = 0; base = CFG2_SECTOR;
         }
@@ -306,8 +306,8 @@ void cfg2_save(void)
         unsigned ok = (i == CFG2_SLOT);
         for (unsigned j = 0; ok && j < CFG2_SLOT; j++) if (chk[j] != rec[j]) ok = 0;
         cfg2_slot = (int8_t)slot;
-        if (ok) break;                                   // иначе второй заход: страница стирается, слот 0
-        cfg2_slot = (int8_t)(512u / CFG2_SLOT);          // принудить стирание
+        if (ok) break;                                   // otherwise second pass: page erased, slot 0
+        cfg2_slot = (int8_t)(512u / CFG2_SLOT);          // force erase
     }
     flash_lock();
 }

@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-pos_test.py — ступенчатые тесты контура положения через SWD (attach). Клон/v1 по символам ELF, родная (--native)
-по фиксированному адресу таблицы 0x20000326. Лог в dumps/<серва>/tests/pos_<fw>_tl<TL>_<время>.csv.
+pos_test.py — step tests of the position loop via SWD (attach). Clone/v1 via ELF symbols, stock (--native)
+via the fixed table address 0x20000326. Log to dumps/<servo>/tests/pos_<fw>_tl<TL>_<time>.csv.
 
   py -3.11 tools/pos_test.py [--tl 150] [--dwell 1.5] [--servo servo_01] [--native] [goal_us ...]
-  по умолчанию ступеньки 1500 1000 2000 1500 мкс
+  default steps 1500 1000 2000 1500 µs
 
-На v1 дополнительно пишет телеметрию 0x60..0x77 (скорость и счётчик Холлов, токи, Vbus) и печатает оценку
-шагов Холлов на единицу АЦП и пиковую скорость.
-Защита: момент не включается, если потенциометр у края или скачет; во время теста момент снимается, если
-положение уходит к краю АЦП, ошибка растёт дольше 300 мс или ток велик.
+On v1 also logs telemetry 0x60..0x77 (Hall speed and counter, currents, Vbus) and prints an estimate of
+Hall steps per ADC unit and peak speed.
+Protection: torque is not enabled if the potentiometer is at the edge or jumping; during the test torque is cut if
+the position goes to the ADC edge, the error grows for more than 300 ms, or the current is high.
 """
 import argparse
 import os
@@ -48,12 +48,12 @@ def emergency_off(native):
         try:
             with session() as s:
                 torque_off(s.target, regs_addr(s.target, native))
-                print("момент выключен после переподключения")
+                print("torque disabled after reconnect")
                 return
         except Exception as e:
             print("  reconnect failed:", e)
             time.sleep(0.5)
-    print("!!! МОМЕНТ НЕ ВЫКЛЮЧЕН — СНИМАЙ ПИТАНИЕ !!!")
+    print("!!! TORQUE NOT DISABLED — CUT POWER !!!")
 
 
 def main():
@@ -77,7 +77,7 @@ def main():
             t = s.target
             regs = regs_addr(t, a.native)
             hb = None
-            if not a.native:   # сердцебиение: при потере SWD прошивка сама снимет момент через 0.5 с
+            if not a.native:   # heartbeat: if SWD is lost, the firmware drops torque itself after 0.5 s
                 dec = ELFBinaryFile(ELF, t.memory_map).symbol_decoder
                 hb = (dec.get_symbol_for_name("g_last_rx_ms").address, dec.get_symbol_for_name("g_ms").address)
                 tmo_saved = t.read16(regs + 0x54)
@@ -97,10 +97,10 @@ def main():
                 return r
 
             r0 = rd(); time.sleep(0.1); r1 = rd()
-            print(f"потенциометр: pos={r0['pos']} / {r1['pos']}, load={r1['load']}, V={r1['volt'] / 10:.1f}"
-                  + ("" if a.native else f", Vbus={r1['vbus_mv']} мВ, hall={r1['hall']}, status=0x{r1['status']:02X}"))
+            print(f"potentiometer: pos={r0['pos']} / {r1['pos']}, load={r1['load']}, V={r1['volt'] / 10:.1f}"
+                  + ("" if a.native else f", Vbus={r1['vbus_mv']} mV, hall={r1['hall']}, status=0x{r1['status']:02X}"))
             if not (150 < r0["pos"] < 3950) or abs(r0["pos"] - r1["pos"]) > 30:
-                sys.exit("потенциометр у края шкалы или скачет — момент не включаю")
+                sys.exit("potentiometer at the edge of the scale or jumping — not enabling torque")
 
             t0 = time.time()
             t.write16(regs + R_TL, a.tl)
@@ -124,13 +124,13 @@ def main():
                         if best is None or err < best:
                             best, best_t = err, now
                         elif err > best + 150 and now - best_t > 0.3:
-                            raise RuntimeError(f"ошибка растёт (pos={r['pos']}, цель={r['goal_adc']}) — направление? стоп")
+                            raise RuntimeError(f"error growing (pos={r['pos']}, target={r['goal_adc']}) — direction? stop")
                         if r["pos"] < 120 or r["pos"] > 3975:
-                            raise RuntimeError(f"положение у края АЦП ({r['pos']}) — стоп")
+                            raise RuntimeError(f"position at ADC edge ({r['pos']}) — stop")
                         if r["load"] > 3000:
-                            raise RuntimeError(f"ток {r['load']} — стоп")
+                            raise RuntimeError(f"current {r['load']} — stop")
                         if r["te"] != 1:
-                            raise RuntimeError(f"момент выключился сам (status=0x{r['status']:02X})")
+                            raise RuntimeError(f"torque turned off by itself (status=0x{r['status']:02X})")
                         time.sleep(0.02)
                     goal_adc = rows[-1][1]["goal_adc"]
                     tail = [r["pos"] for dt, r in rows if dt > a.dwell - 0.3]
@@ -140,8 +140,8 @@ def main():
                     settle = next((dt for dt, r in rows if abs(r["pos"] - goal_adc) <= 30 and
                                    all(abs(x["pos"] - goal_adc) <= 30 for d2, x in rows if d2 >= dt)), None)
                     peak_load = max(r["load"] for _, r in rows)
-                    line = (f"goal {g:4d} мкс → цель {goal_adc:4d}: {start_pos:4d} → {final:6.0f} (ошибка {round(final) - goal_adc:+4d}), "
-                            f"перерег. {overshoot:3d}, устан. {'%.2f с' % settle if settle is not None else 'нет'}, пик Load {peak_load}")
+                    line = (f"goal {g:4d} µs → target {goal_adc:4d}: {start_pos:4d} → {final:6.0f} (error {round(final) - goal_adc:+4d}), "
+                            f"overshoot {overshoot:3d}, settle {'%.2f s' % settle if settle is not None else 'none'}, peak Load {peak_load}")
                     if not a.native:
                         last = rows[-1][1]
                         dpos = last["pos"] - start_pos
@@ -152,22 +152,22 @@ def main():
                         for _, r in rows: status_or |= r["status"]
                         moving = [r for dt, r in rows if r["duty"] > 0 and abs(r["speed"]) > 0]
                         mean_iw = sum(r["i_wind"] for r in moving) / len(moving) if moving else 0
-                        line += (f"\n           Холлы: Δ={dhall:+d} шагов на Δpos={dpos:+d} ед → {abs(dhall) / abs(dpos) if dpos else 0:.3f} шаг/ед; "
-                                 f"пик скорости {peak_speed} шаг/с; I_обм пик {peak_iw} мА, в движении ср. {mean_iw:.0f} мА; "
-                                 f"Vbus {last['vbus_mv']} мВ; status за шаг 0x{status_or:02X}")
+                        line += (f"\n           Halls: Δ={dhall:+d} steps over Δpos={dpos:+d} units → {abs(dhall) / abs(dpos) if dpos else 0:.3f} step/unit; "
+                                 f"peak speed {peak_speed} step/s; I_wind peak {peak_iw} mA, mean while moving {mean_iw:.0f} mA; "
+                                 f"Vbus {last['vbus_mv']} mV; status per step 0x{status_or:02X}")
                     print(line)
             finally:
                 torque_off(t, regs)
                 if hb: t.write16(regs + 0x54, tmo_saved)
                 time.sleep(0.2)
                 r = rd()
-                print(f"момент выключен: pos={r['pos']} load={r['load']} V={r['volt'] / 10:.1f}")
+                print(f"torque disabled: pos={r['pos']} load={r['load']} V={r['volt'] / 10:.1f}")
     except Exception as e:
         print("!!!", e)
         emergency_off(a.native)
     finally:
         csv.close()
-        print("лог:", csv_path)
+        print("log:", csv_path)
 
 
 if __name__ == "__main__":

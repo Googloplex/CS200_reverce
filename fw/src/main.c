@@ -1,19 +1,19 @@
-// Клон родной прошивки Kpower HB200T (приложение с 0x08001000, загрузчик Kpower остаётся).
-// Порядок инициализации и главный цикл — как в родной (re/decomp_named.c, FUN_080035e8).
+// Clone of Kpower HB200T stock firmware (application at 0x08001000, Kpower bootloader stays).
+// Init order and main loop as in stock (re/decomp_named.c, FUN_080035e8).
 #include "board.h"
 #include "regs.h"
 #include "dxl.h"
 #include "sense.h"
 #include "motor.h"
 
-/* защита от цикла перезагрузок IWDG: счётчик в неинициализируемой RAM переживает сброс, но не выключение питания */
+/* IWDG reboot-loop guard: counter in no-init RAM survives reset but not power-off */
 __attribute__((section(".noinit"))) static uint32_t boot_magic;
 __attribute__((section(".noinit"))) static uint32_t boot_count;
 #define BOOT_MAGIC 0xB007C0DEu
 
-static void iwdg_start(void)   // ~1 с при RCL 32768 Гц / 32
+static void iwdg_start(void)   // ~1 s at RCL 32768 Hz / 32
 {
-    sc_dbg_stop(1u << 9);       // пёс стоит, пока ядро остановлено отладчиком (прошивка, halt)
+    sc_dbg_stop(1u << 9);       // watchdog stops while core is halted by debugger (flashing, halt)
     IWDG_KR = 0xCCCCu;
     IWDG_KR = 0x5555u;
     IWDG_PR = 3u;
@@ -45,25 +45,25 @@ int main(void)
     dxl_uart_setup();
     dxl_tx_buf_init();
     board_nvic_init();
-    regs[REG_FW_VER] = 0x25;        // v1.5: + кубическая интерполяция по меткам времени, мягкие упоры, детект упора, политика отказа
+    regs[REG_FW_VER] = 0x25;        // v1.5: + cubic interpolation by timestamps, soft limits, stall detection, failsafe policy
     if ((regs[REG_CFG_FLAGS] & CFG_WDT) && boot_count < 4) {
         iwdg_start();
         wdt_on = 1;
     } else if (boot_count >= 4) {
-        g_status |= ST_WDT_GUARD;   // 3 быстрых сброса подряд — сторожевой таймер не включаем
+        g_status |= ST_WDT_GUARD;   // 3 fast resets in a row — do not enable watchdog
     }
-    __enable_irq();                 // до этого момента PRIMASK установлен со старта
+    __enable_irq();                 // PRIMASK set since start until here
 
     while (1) {
         if (wdt_on) IWDG_KR = 0xAAAAu;
-        if (boot_count && g_ms > 5000u) boot_count = 0;   // прожили 5 с — цикл перезагрузок не идёт
+        if (boot_count && g_ms > 5000u) boot_count = 0;   // alive 5 s — no reboot loop
         motor_stall_check();
         dxl_poll();
         sense_update();
         sense_mcu_temp_poll();
-        // v1: таймаут шины и перенапряжение → момент выкл
+        // v1: bus timeout and overvoltage → torque off
         {
-            // v1.5: таймаут шины и Vbus проверяются в TIM14 (motor.c), один контекст — без гонок на g_status/imp_act
+            // v1.5: bus timeout and Vbus checked in TIM14 (motor.c), single context — no races on g_status/imp_act
         }
         if (g_baud_flag) {
             g_baud_flag = 0;
@@ -74,7 +74,7 @@ int main(void)
         if (g_boot_flag == 'Z') {
             break;
         }
-        // запись во Flash останавливает ядро на миллисекунды (векторы и ISR во Flash) — только без момента, иначе откладываем
+        // Flash write stalls the core for milliseconds (vectors and ISRs in Flash) — only with torque off, otherwise deferred
         if (regs[REG_TORQUE_ENABLE] == 0) {
             if (g_save_flag == 1) {
                 g_save_flag = 0;
@@ -86,7 +86,7 @@ int main(void)
             }
         }
     }
-    // команда 0x64: сохранить журнал с флагом 'Z' и уйти в загрузчик
+    // command 0x64: save journal with flag 'Z' and jump to bootloader
     journal_save(g_boot_flag);
     while (g_tx_busy) {
     }

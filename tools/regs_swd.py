@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-regs_swd.py — таблица регистров КЛОНА (fw/) через SWD без остановки ядра (attach), по символам из ELF.
-Аналог tools/spin_native.py для родной прошивки. Шина/UART-адаптер не нужны.
+regs_swd.py — CLONE (fw/) register table via SWD without halting the core (attach), using ELF symbols.
+Counterpart of tools/spin_native.py for the stock firmware. No bus/UART adapter needed.
 
-  py -3.11 tools/regs_swd.py show                 # вся таблица 0x00..0x7F с разбором
-  py -3.11 tools/regs_swd.py watch                # Present Position/Load/Voltage раз в 100 мс
-  py -3.11 tools/regs_swd.py goal 1500 [TL]       # Goal Position (мкс) + Torque Limit, включает момент
-  py -3.11 tools/regs_swd.py torque 0             # выключить момент
-  py -3.11 tools/regs_swd.py set 0x1A 6           # записать байт
+  py -3.11 tools/regs_swd.py show                 # whole table 0x00..0x7F, decoded
+  py -3.11 tools/regs_swd.py watch                # Present Position/Load/Voltage every 100 ms
+  py -3.11 tools/regs_swd.py goal 1500 [TL]       # Goal Position (µs) + Torque Limit, enables torque
+  py -3.11 tools/regs_swd.py torque 0             # disable torque
+  py -3.11 tools/regs_swd.py set 0x1A 6           # write a byte
 """
 import os
 import struct

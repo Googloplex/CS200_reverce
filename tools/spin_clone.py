@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-spin_clone.py — короткий прогон мотора на КЛОНЕ (fw/) через SWD (attach, по символам ELF), аналог spin_native.py.
-Включает момент с заданным Torque Limit и Goal, печатает Present Load/Voltage, по истечении времени
-(или при любой ошибке связи) выключает момент; если связь потеряна — переподключается, пока не выключит.
+spin_clone.py — short motor run on the CLONE (fw/) via SWD (attach, ELF symbols), counterpart of spin_native.py.
+Enables torque with the given Torque Limit and Goal, prints Present Load/Voltage; when time is up
+(or on any link error) disables torque; if the link is lost, reconnects until torque is off.
 
-  py -3.11 tools/spin_clone.py [секунды=2] [torque_limit=150] [goal_us=2100]
+  py -3.11 tools/spin_clone.py [seconds=2] [torque_limit=150] [goal_us=2100]
 
-У servo_01 нет потенциометра: контур не сходится, мотор крутится всё время прогона. БП с лимитом ≥ 2 А
-(пусковой бросок > 2× установившегося тока — см. docs/motor.md), без нагрузки на выходе.
+servo_01 has no potentiometer: the loop never settles, the motor spins for the whole run. PSU limit ≥ 2 A
+(inrush > 2× steady-state current — see docs/motor.md), no load on the output.
 """
 import os
 import struct
@@ -57,7 +57,7 @@ def emergency_off(timeout=15.0):
         except Exception as e:
             print("  reconnect failed:", e)
             time.sleep(0.5)
-    print("!!! МОМЕНТ НЕ ВЫКЛЮЧЕН — СНИМАЙ ПИТАНИЕ !!!")
+    print("!!! TORQUE NOT DISABLED — CUT POWER !!!")
 
 
 def main():
@@ -70,7 +70,7 @@ def main():
             r = regs_addr(t)
             print("before:", status(t, r))
             try:
-                # пока момент выключен, прошивка каждый тик обнуляет Goal — поэтому сначала Torque Enable
+                # while torque is off, firmware zeroes Goal every tick — so Torque Enable goes first
                 t.write16(r + REG_TORQUE_LIMIT, limit)
                 t.write8(r + REG_TORQUE_ENABLE, 1)
                 t.write16(r + REG_GOAL, goal)

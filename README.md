@@ -1,146 +1,151 @@
-# Реверс-инжиниринг сервопривода CS200 (Kpower HB200T) со сбитых «Шахедов» и «Гераней»
+Русская версия: [README.ru.md](README.ru.md)
 
-Своя прошивка в родной микроконтроллер на родной плате: от дампа Flash через SWD до клона 1 в 1 и дальше —
-момент в амперах, импеданс одной командой, синусоидальная коммутация, самотест, чёрный ящик. Ни одного своего
-резистора на плате не добавлено.
+# Reverse engineering the CS200 (Kpower HB200T) servo from downed Shahed and Geran drones
+
+Custom firmware in the stock microcontroller on the stock board: from a Flash dump over SWD to a 1:1 clone and beyond —
+torque in amperes, impedance in a single command, sinusoidal commutation, self-test, flight recorder. Not a single resistor
+added to the board.
 
 *Reverse engineering of the Kpower HB200T brushless servo salvaged from downed Shahed/Geran drones: SWD dump of the
 stock firmware, a bit-exact GCC clone of it running on the original Linsynix LCM32F037 (Cortex-M0, 32 KB flash, 4 KB RAM),
 then a new control stack on top — model-based current limiting, MIT-style impedance commands with time-stamped cubic
-interpolation, sinusoidal commutation with Hall interpolation, self-identification, flight recorder. All in Russian.*
+interpolation, sinusoidal commutation with Hall interpolation, self-identification, flight recorder.*
 
-## Что это за серва
-- 200 кг·см стопового момента, 12–24 В, 15 А, бесколлекторный инраннер Ø29×42 мм с Холлами и 4-ступенчатым стальным
-  редуктором ≈ 1:220, алюминиевый корпус. На БПЛА стояла как рулевая машинка с управлением ШИМ 50–333 Гц.
-- Плата: MCU **Linsynix LCP037BT32EU8** (ядро LCM32F037, Cortex-M0 72 МГц, 32 КБ Flash, 4 КБ SRAM, **встроенный
-  трёхфазный предрайвер**), 12 × NCEP6090AGU (60 В / 90 А) по два на плечо, один шунт 2.5 мОм в шине, buck XL7005A.
-- Родная прошивка: Dynamixel Protocol 1.0 (таблица AX-12 плюс поля Kpower) по полудуплексному UART на сигнальном проводе,
-  загрузчик с обновлением по тому же проводу, журнал настроек во Flash.
+Evidence tags: [MEAS] measured, [DS] datasheet, [SPEC] vendor spec sheet, [HYP] hypothesis.
 
-## Как это выглядело в первый день
-Подписи на фото — гипотезы до прозвонки и реверса (со знаками вопроса); проверенная распиновка — в [docs/pinmap.md](docs/pinmap.md).
+## What the servo is
+- 200 kg·cm stall torque, 12–24 V, 15 A, brushless inrunner Ø29×42 mm with Hall sensors and a 4-stage steel
+  gearbox ≈ 1:220, aluminium housing. On the UAV it served as a control-surface actuator driven by 50–333 Hz PWM.
+- Board: MCU **Linsynix LCP037BT32EU8** (LCM32F037 core, Cortex-M0 72 MHz, 32 KB Flash, 4 KB SRAM, **built-in
+  three-phase predriver**), 12 × NCEP6090AGU (60 V / 90 A), two per leg, a single 2.5 mΩ shunt in the bus, XL7005A buck.
+- Stock firmware: Dynamixel Protocol 1.0 (AX-12 table plus Kpower fields) over half-duplex UART on the signal wire,
+  bootloader with updates over the same wire, settings journal in Flash.
 
-| Плата со стороны MCU | Обратная сторона: питание логики |
+## What it looked like on day one
+The on-image labels are in Russian and are first-day hypotheses made before continuity checks and reverse engineering
+(hence the question marks); the verified pinout is in [docs/pinmap.md](docs/pinmap.md).
+
+| Board, MCU side | Back side: logic power |
 |---|---|
-| ![Плата: SWD-гребёнка, потенциометр, пады G/S/F, силовые площадки](docs/photos/servo_pinout.png) | ![Обратная сторона: XL7005A, SS34, электролиты, керамика, TVS, жгут](docs/photos/servo_pinout_back.png) |
+| ![Board: SWD header, potentiometer, G/S/F pads, power pads (labels in Russian)](docs/photos/servo_pinout.png) | ![Back side: XL7005A, SS34, electrolytics, ceramics, TVS, harness (labels in Russian)](docs/photos/servo_pinout_back.png) |
 
-![MCU LCP037BT крупно: столбик из 5 площадок (VDD, GND, SWDIO, SWCLK, nRST), 12 ключей NCEP6090AGU, шунт 2R5m, резисторы затворов](docs/photos/servo_mcu_pinout.png)
+![LCP037BT MCU close-up: column of 5 pads (VDD, GND, SWDIO, SWCLK, nRST), 12 NCEP6090AGU MOSFETs, 2R5m shunt, gate resistors (labels in Russian)](docs/photos/servo_mcu_pinout.png)
 
-## Что сделано
-| Этап | Результат |
+## What has been done
+| Stage | Result |
 |---|---|
-| **Вскрытие** | SWD-гребёнка найдена и прозвонена, Flash не защищён (RDP 0) — дамп прошивки, загрузчика и инфо-зоны чипа ([docs/memory_map.md](docs/memory_map.md)) |
-| **Реверс** | Ghidra по SVD из Keil-пака: тактирование, маршрутизация TIM1 → предрайвер, Холлы, АЦП потенциометра/тока/шины, протокол, журнал, контур положения — [docs/native_fw_config.md](docs/native_fw_config.md), [docs/pinmap.md](docs/pinmap.md) |
-| **Клон** | `fw/` — функциональный клон родного приложения под GCC/CMake, живёт под родным загрузчиком. A/B на одной серве: ступеньки совпали в пределах выборки 20 мс и шума потенциометра ([docs/clone_ab_test.md](docs/clone_ab_test.md)) |
-| **Своя прошивка v1.5** | всё ниже; справочник — [docs/registers_v1.md](docs/registers_v1.md), стенды — [docs/bench_log.md](docs/bench_log.md) |
-| **Мотор** | pp = 1, Kv ≈ 1475 об/мин/В, R = 505 мОм, трение, мёртвый ход редуктора ~12° при реверсе — [docs/motor.md](docs/motor.md) |
+| **Opening up** | SWD header found and probed, Flash not protected (RDP 0) — dump of the firmware, bootloader and chip info area ([docs/memory_map.md](docs/memory_map.md)) |
+| **Reverse engineering** | Ghidra with the SVD from the Keil pack: clocking, TIM1 → predriver routing, Halls, ADC for potentiometer/current/bus, protocol, journal, position loop — [docs/native_fw_config.md](docs/native_fw_config.md), [docs/pinmap.md](docs/pinmap.md) |
+| **Clone** | `fw/` — functional clone of the stock application under GCC/CMake, runs under the stock bootloader. A/B on the same servo: step responses match within the 20 ms sampling and potentiometer noise ([docs/clone_ab_test.md](docs/clone_ab_test.md)) |
+| **Custom firmware v1.5** | everything below; reference — [docs/registers_v1.md](docs/registers_v1.md), bench tests — [docs/bench_log.md](docs/bench_log.md) |
+| **Motor** | pp = 1, Kv ≈ 1475 rpm/V, R = 505 mΩ, friction, gearbox backlash ~12° on reversal — [docs/motor.md](docs/motor.md) |
 
-### Что умеет прошивка v1.5 (Flash 21.8 из 26.5 КБ, RAM 2.6 КБ, без soft-float)
-- **Момент в амперах.** Потолок duty по модели (I·R + Ke·ω)/Vbus каждую мс — без запаздывания фильтра шунта. Ступенька 50° на
-  полном duty: 0.12 с, перерегулирование 2–5 ед из 4096, ток шины ≤ 3.5 А вместо 15 А и ухода ЛБП в защиту.
-- **Импеданс одной записью** (как MIT Mini Cheetah / moteus): p, v, Kp, Kd, τ_ff, tmax, время исполнения. Синхронизация часов
-  по шине и кубическая интерполяция цели по меткам времени: хост шлёт 50–100 Гц, серва ведёт цель гладко на 1 кГц, новые
-  точки склеиваются на ходу без рывка.
-- **Синусоидальная коммутация** с интерполяцией угла по Холлам и 3-й гармоникой, обновление в прерывании TIM1 на 23.4 кГц
-  без делений (~150 тактов из 3077). Подбор сдвига расстановки Холлов и опережения по асимметрии тока.
-- **Холлы как датчик**: скорость по 6 фронтам (шум 150 → 10 шаг/с), счётчик, одометр.
-- **Защиты как фичи, а не как стоп-кран**: мягкие упоры с пружиной, детект упора и контакта (ротор затормозил, а контур
-  толкал — 2–3 мс, без IMU), политика отказа (тормоз / свободный ход / удержание в точке при потере связи), автомат
-  состояний и защёлка, I²t с «процентом доступного момента», TEST_UNLIMITED на 10 с с записью предыстории.
-- **Самотест одной командой**: порядок Холлов, направление, шагов на единицу датчика, Kv, трение (Кулон + вязкое),
-  duty страгивания, мёртвый ход при реверсе; возврат в точку старта.
-- **Паспорт и телеметрия**: UID чипа и назначение ID по UID без доступа к серве, температура кристалла по заводской
-  калибровке, энергия из шины, счётчики пакетов, момент на выходе в мН·м с вычетом трения, чёрный ящик 260 мс по 5 мс
-  с заморозкой по событию, быстрая телеметрия одним SYNC_READ, сохраняемая конфигурация в своём секторе Flash.
-- Совместимость со стоком сохранена: Dynamixel 1.0, тот же журнал, родной загрузчик на месте, откат одной командой.
+### What firmware v1.5 does (Flash 21.8 of 26.5 KB, RAM 2.6 KB, no soft-float)
+- **Torque in amperes.** Duty ceiling from the model (I·R + Ke·ω)/Vbus every ms — no shunt filter lag. A 50° step at
+  full duty: 0.12 s, overshoot 2–5 units of 4096, bus current ≤ 3.5 A instead of 15 A and the bench PSU tripping.
+- **Impedance in one write** (like MIT Mini Cheetah / moteus): p, v, Kp, Kd, τ_ff, tmax, execution time. Clock sync
+  over the bus and cubic interpolation of the target by timestamps: the host sends at 50–100 Hz, the servo tracks the target smoothly at 1 kHz, new
+  points are spliced in on the fly without a jerk.
+- **Sinusoidal commutation** with Hall-interpolated angle and 3rd harmonic, updated in the TIM1 interrupt at 23.4 kHz
+  with no divisions (~150 of 3077 cycles). Hall placement offset and phase advance tuned by current asymmetry.
+- **Halls as a sensor**: speed over 6 edges (noise 150 → 10 steps/s), counter, odometer.
+- **Protections as features, not an emergency stop**: soft limits with a spring, stall and contact detection (rotor stalled while the loop
+  was pushing — 2–3 ms, no IMU), failsafe policy (brake / coast / hold position on loss of comms), state
+  machine and latch, I²t with "percent of available torque", TEST_UNLIMITED for 10 s with pre-trigger history recording.
+- **Self-test in one command**: Hall order, direction, steps per sensor unit, Kv, friction (Coulomb + viscous),
+  breakaway duty, backlash on reversal; returns to the starting point.
+- **Identity and telemetry**: chip UID and ID assignment by UID without physical access to the servo, die temperature from the factory
+  calibration, energy drawn from the bus, packet counters, output torque in mN·m with friction subtracted, 260 ms flight recorder at 5 ms
+  with freeze on event, fast telemetry in a single SYNC_READ, persistent config in its own Flash sector.
+- Stock compatibility kept: Dynamixel 1.0, the same journal, stock bootloader in place, rollback in one command.
 
-## Как это делалось
+## How it was done
 
-**1. Вскрытие.** На руках — ящик сервоприводов со сбитых дронов, из документации только паспорт на сайте Kpower. Внутри плата
-с незнакомым китайским чипом Linsynix LCP037BT32EU8: Cortex-M0 и трёхфазный предрайвер в одном корпусе QFN40, 12 ключей по два
-на плечо, один шунт 2.5 мОм в минусовой шине, потенциометр на боковой шестерне. Прозвонка: столбик из пяти площадок слева от MCU —
-VDD, GND, SWDIO, SWCLK, nRST. Серва питается от лабораторного БП с лимитом 100 мА, ST-Link + pyOCD, `cortex_m` вслепую: CPUID
-0x410CC200, защита Flash на уровне 0. Дамп Flash, загрузчика и инфо-зоны, sha256, одна серва отложена нетронутой.
+**1. Opening up.** At hand — a box of servos from downed drones; the only documentation was the spec sheet on the Kpower website. Inside, a board
+with an unfamiliar Chinese chip, the Linsynix LCP037BT32EU8: Cortex-M0 and a three-phase predriver in one QFN40 package, 12 MOSFETs, two
+per leg, a single 2.5 mΩ shunt in the negative bus, a potentiometer on a side gear. Probing: a column of five pads left of the MCU —
+VDD, GND, SWDIO, SWCLK, nRST. Servo powered from a bench PSU limited to 100 mA, ST-Link + pyOCD, `cortex_m` blind: CPUID
+0x410CC200, Flash protection at level 0. Dump of Flash, bootloader and info area, sha256, one servo set aside untouched.
 
-**2. Документы.** Даташиты чипа на LCSC, Keil-пак с SVD и алгоритмом Flash, потом Reference Manual с сайта Linsynix — на китайском;
-текст вытаскивается PyMuPDF (`tools/rm_pages.py`), дальше grep по иероглифам. Без RM многое пришлось снимать экспериментом
-(см. п. 7).
+**2. Documents.** Chip datasheets on LCSC, a Keil pack with SVD and the Flash algorithm, then the Reference Manual from the Linsynix site — in Chinese;
+text is extracted with PyMuPDF (`tools/rm_pages.py`), then grep by Chinese characters. Without the RM, a lot had to be found by experiment
+(see item 7).
 
-**3. Реверс.** Ghidra, Cortex-M0 Thumb, карта периферии из SVD скриптом (`re/ghidra_scripts`). По регистрам нашлись: кварц 16 МГц →
-PLL 72 МГц; TIM1 с комплементарными каналами на внутренние входы предрайвера; Холлы на PA4–PA6 через EXTI; потенциометр, ток через
-внешний усилитель и делитель шины на АЦП через DMA; UART1 на сигнальном проводе с DMA и переключением направления. Протокол оказался
-Dynamixel 1.0 с таблицей AX-12 и полями Kpower, цель в микросекундах 900..2100, журнал настроек записями по 128 байт в последних
-двух секторах, загрузчик Kpower в первых 4 КБ с форвардингом прерываний в приложение ([docs/native_fw_config.md](docs/native_fw_config.md),
+**3. Reverse engineering.** Ghidra, Cortex-M0 Thumb, peripheral map from the SVD via a script (`re/ghidra_scripts`). The registers revealed: 16 MHz crystal →
+72 MHz PLL; TIM1 with complementary channels to the predriver's internal inputs; Halls on PA4–PA6 via EXTI; potentiometer, current via an
+external amplifier and the bus divider on the ADC via DMA; UART1 on the signal wire with DMA and direction switching. The protocol turned out to be
+Dynamixel 1.0 with the AX-12 table and Kpower fields, target in microseconds 900..2100, settings journal as 128-byte records in the last
+two sectors, Kpower bootloader in the first 4 KB forwarding interrupts to the application ([docs/native_fw_config.md](docs/native_fw_config.md),
 [docs/pinmap.md](docs/pinmap.md)).
 
-**4. Клон.** GCC + CMake, своя таблица векторов, линковка с 0x08001000 — родной загрузчик остаётся и умеет обновлять по проводу.
-Функции переносились по адресам 1 в 1, вплоть до двойного вызова инициализации тактирования и неинициализированных полей структур.
-Первая прошивка — только проверка периферии скриптом, который читает регистры по символам ELF через SWD; потом мотор при лимите
-тока; потом A/B против родной прошивки на той же серве: траектории совпали в пределах выборки ([docs/clone_ab_test.md](docs/clone_ab_test.md)).
+**4. Clone.** GCC + CMake, own vector table, linked at 0x08001000 — the stock bootloader stays and can still update over the wire.
+Functions were ported address by address 1:1, down to the double call of the clock init and uninitialised struct fields.
+First flash — only a peripheral check by a script that reads registers by ELF symbols over SWD; then the motor under a current
+limit; then A/B against the stock firmware on the same servo: trajectories matched within sampling ([docs/clone_ab_test.md](docs/clone_ab_test.md)).
 
-**5. Стенд через SWD, а не через шину.** USB-UART адаптер для полудуплекса так и не был доведён (джампер питания, пайка, резистор в TX),
-и весь стенд переехал на SWD: скрипты пишут регистры прямо в RAM по символам ELF, читают телеметрию 50 раз в секунду, а чтобы
-таймаут шины не снимал момент — шлют «сердцебиение». Попутно выяснилось, что ST-Link ругается на верификацию записи, когда прошивка
-перезаписывает байт быстрее него, и что зависший pyOCD роняет пробник из USB до переподключения.
+**5. Bench over SWD, not over the bus.** The USB-UART adapter for half-duplex never got finished (power jumper, soldering, resistor in TX),
+so the whole bench moved to SWD: scripts write registers straight into RAM by ELF symbols, read telemetry 50 times a second, and, so that
+the bus timeout does not drop torque, send a "heartbeat". Along the way it turned out that ST-Link complains about write verification when the firmware
+overwrites a byte faster than it does, and that a hung pyOCD drops the probe off USB until it is replugged.
 
-**6. Своя прошивка поверх клона.** Холлы как датчик (счётчик, период, скорость), телеметрия, защиты, контроллер с трапецией и PD,
-оценка сопротивления и температуры обмотки онлайн, IWDG с защитой от цикла перезагрузок, SYNC_READ со слотами.
+**6. Custom firmware on top of the clone.** Halls as a sensor (counter, period, speed), telemetry, protections, controller with trapezoidal profile and PD,
+online winding resistance and temperature estimate, IWDG with reboot-loop protection, SYNC_READ with slots.
 
-**7. Что дал Reference Manual.** АЦП синхронно с ШИМ от TIM1_OC4 — заработало только с установленным CC4E, хотя на вывод канал не
-выходит. Сторож АЦП → OCREF_CLR как аппаратный лимит тока: перебор четырёх комбинаций окна и уровня, одна из них — разнос, другая —
-глухой стоп, рабочая — окно 0..HT с активным низким уровнем. Компаратор на входе тока не переключается ни при каком пороге — так и
-остался открытым вопросом. Главное открытие: сигнал шунта на плате отфильтрован, синхронная выборка даёт средний ток шины, а не ток
-в окне ключа — это определило всю дальнейшую архитектуру момента.
+**7. What the Reference Manual gave.** ADC synchronous with PWM from TIM1_OC4 — worked only with CC4E set, even though the channel is not
+routed to a pin. ADC watchdog → OCREF_CLR as a hardware current limit: of the four combinations of window and polarity tried, one gives runaway, another a
+dead stop, the working one is window 0..HT with active-low level. The comparator on the current input does not toggle at any threshold — it
+remained an open question. The main finding: the shunt signal is filtered on the board, synchronous sampling yields the average bus current, not the current
+within the switch window — this defined the whole torque architecture that followed.
 
-**8. Импеданс и момент в амперах.** Команда p, v, Kp, Kd, τ_ff одной записью. Первые тесты «прошли» подозрительно спокойно: стоковый
-Torque Limit = 300 из журнала резал выход. Сняли — и ступенька на полном duty с места уронила ЛБП в защиту: 24 В / 0.5 Ом ≈ 48 А по
-Ому, а при реверсе на ходу ещё больше. Измеренный ток ограничить не успевает (фильтр), сторож АЦП тоже. Решение — потолок duty по
-модели (I·R + Ke·ω)/Vbus каждую миллисекунду: ток физически не может превысить лимит, измерение только страховка. Та же ступенька
-под 8 А стала быстрее и точнее, чем без потолка. По дороге: оценка скорости по Холлам держала старое значение до 100 мс после
-остановки и раскачивала привод на 16 А; два регистра перекрывались байтом; измеренный ограничитель замораживал потолок навсегда.
+**8. Impedance and torque in amperes.** Command p, v, Kp, Kd, τ_ff in one write. The first tests "passed" suspiciously calmly: the stock
+Torque Limit = 300 from the journal was clipping the output. Removed it — and a full-duty step from standstill tripped the bench PSU: 24 V / 0.5 Ω ≈ 48 A by
+Ohm's law, and even more on reversal while moving. The measured-current limiter cannot react in time (filter), nor can the ADC watchdog. Solution — a duty ceiling from the
+model (I·R + Ke·ω)/Vbus every millisecond: current physically cannot exceed the limit, measurement is only a safety net. The same step
+under 8 A became faster and more accurate than without the ceiling. Along the way: the Hall speed estimate held its old value for up to 100 ms after
+stopping and made the drive oscillate at 16 A; two registers overlapped by a byte; the measured limiter froze the ceiling forever.
 
-**9. Место под фичи.** Библиотека soft-float занимала 9.5 КБ — сток считал Present Load через double. Всё переведено в целые
-(Q8-профили, микроджоули, точные дроби стока) — Flash 25 → 16 КБ. На освободившееся место: интерполяция по меткам времени, мягкие упоры,
-детект упора и контакта, политика отказа, автомат состояний, паспорт по UID, температура кристалла (калибровка в инфо-зоне чипа),
-счётчики, чёрный ящик, сохраняемая конфигурация, самотест, синусоидальная коммутация.
+**9. Room for features.** The soft-float library took 9.5 KB — the stock firmware computed Present Load in double. Everything moved to integers
+(Q8 profiles, microjoules, exact stock fractions) — Flash 25 → 16 KB. The freed space went to: timestamp interpolation, soft limits,
+stall and contact detection, failsafe policy, state machine, identity by UID, die temperature (calibration in the chip info area),
+counters, flight recorder, persistent config, self-test, sinusoidal commutation.
 
-**10. Ревью до стенда.** Пять пакетов написаны вслепую (пробник был недоступен), поэтому перед прошивкой — два независимых прохода
-ревью: 20 с лишним находок, среди них сдвиг кольца АЦП при остановке посреди последовательности каналов, обход защёлки командой,
-рваная запись команды по шине, перекрытие регистров, переполнение тепла. Всё исправлено до первого запуска.
+**10. Review before the bench.** Five packages were written blind (the probe was unavailable), so before flashing — two independent review
+passes: 20-odd findings, among them an ADC ring shift when stopping mid channel sequence, latch bypass by a command,
+torn command write over the bus, register overlap, heat accumulator overflow. All fixed before the first run.
 
-**11. Стенд без редуктора.** 14 из 14 проверок. Синус поехал с первого раза: 97 % скорости шестишаговой при том же duty; по
-асимметрии тока в двух направлениях найден сдвиг расстановки Холлов (+6° эл.) и опережение (+8°). Скорость по 6 фронтам убрала
-шум неравномерной расстановки Холлов (150 → 10 шаг/с). Сопротивление — по заблокированному валу: 505 мОм (на duty 120 вал уже не
-удержать рукой).
+**11. Bench without the gearbox.** 14 of 14 checks. Sinusoidal worked first time: 97 % of six-step speed at the same duty; from the
+current asymmetry in both directions the Hall placement offset (+6° el.) and phase advance (+8°) were found. Speed over 6 edges removed
+the noise from uneven Hall placement (150 → 10 steps/s). Resistance — with a locked shaft: 505 mΩ (at duty 120 the shaft can no longer
+be held by hand).
 
-**12. Стенд с редуктором.** Регрессия стока против старых A/B-логов, импеданс, все фичи, самотест выдал паспорт мотора. Редуктор дважды
-отваливался — ротор крутился при стоящем выходе, это видно по Холлам раньше, чем по чему-либо ещё. После сборки измерен мёртвый ход
-при реверсе: 38–48 шагов Холлов, около 12° на выходе, одинаково по всему ходу ([docs/motor.md](docs/motor.md)) — главный механический
-вывод и причина, почему следующий шаг — энкодер на выходе.
+**12. Bench with the gearbox.** Stock regression against the old A/B logs, impedance, all features, self-test produced the motor profile. The gearbox twice
+came apart — the rotor spun while the output stood still, visible in the Halls before anything else. After reassembly backlash on reversal
+was measured: 38–48 Hall steps, about 12° at the output, the same over the whole travel ([docs/motor.md](docs/motor.md)) — the main mechanical
+conclusion and the reason why the next step is an encoder on the output.
 
-## Что где лежит
-- `docs/` — результат реверса и справочники: [registers_v1.md](docs/registers_v1.md) (регистры, биты, инструкции, поведение),
-  [bench_log.md](docs/bench_log.md) (все стенды по порядку), [motor.md](docs/motor.md), [pinmap.md](docs/pinmap.md),
+## What is where
+- `docs/` — reverse engineering results and references: [registers_v1.md](docs/registers_v1.md) (registers, bits, instructions, behaviour),
+  [bench_log.md](docs/bench_log.md) (all bench tests in order), [motor.md](docs/motor.md), [pinmap.md](docs/pinmap.md),
   [native_fw_config.md](docs/native_fw_config.md), [memory_map.md](docs/memory_map.md), [clone_ab_test.md](docs/clone_ab_test.md), [roadmap.md](docs/roadmap.md).
-- `fw/` — прошивка: `src/` (board, system, regs, dxl, sense, motor, startup), `ld/app.ld`, `cmake/`, `build.sh`, `flash.sh`, `restore_native.sh`, [README](fw/README.md).
-- `tools/` — стенды и утилиты на pyOCD, пробник ESP32-S3.
-- `dumps/servo_01/` — контрольные суммы дампа, разобранный журнал, логи ступенек.
-- `re/` — скрипты Ghidra и список функций родной прошивки.
+- `fw/` — firmware: `src/` (board, system, regs, dxl, sense, motor, startup), `ld/app.ld`, `cmake/`, `build.sh`, `flash.sh`, `restore_native.sh`, [README](fw/README.md).
+- `tools/` — bench tests and utilities on pyOCD, ESP32-S3 probe.
+- `dumps/servo_01/` — dump checksums, decoded journal, step response logs.
+- `re/` — Ghidra scripts and the function list of the stock firmware.
 
-## Инструменты
-- `fw/build.sh`, `fw/flash.sh`, `fw/restore_native.sh` — GCC 12 + CMake/Ninja, pyOCD с алгоритмом Flash из Keil-пака.
-- `tools/` — стенды через SWD по символам ELF: `imp_test.py` (импеданс, потолок тока), `feat_test.py` / `feat2_test.py`
-  (все фичи v1.5), `nogear_test.py` (мотор без редуктора, синус против шестишаговой), `lockrotor_test.py` (R обмотки),
-  `pos_test.py` (ступеньки, A/B с родной), `dump_one.py` (дамп только чтение), `dxl_cli.py` / `bus_diag.py` (шина),
-  `rm_pages.py` (текст Reference Manual с иероглифами для grep).
-- `tools/esp32_dap/` — свой CMSIS-DAP пробник на ESP32-S3 (USB), на случай когда ST-Link под рукой нет.
-- `re/` — скрипты Ghidra (SVD → карта периферии, разметка, декомпиляция) и список функций родной прошивки.
+## Tools
+- `fw/build.sh`, `fw/flash.sh`, `fw/restore_native.sh` — GCC 12 + CMake/Ninja, pyOCD with the Flash algorithm from the Keil pack.
+- `tools/` — bench tests over SWD by ELF symbols: `imp_test.py` (impedance, current ceiling), `feat_test.py` / `feat2_test.py`
+  (all v1.5 features), `nogear_test.py` (motor without gearbox, sinusoidal vs six-step), `lockrotor_test.py` (winding R),
+  `pos_test.py` (step responses, A/B against stock), `dump_one.py` (read-only dump), `dxl_cli.py` / `bus_diag.py` (bus),
+  `rm_pages.py` (Reference Manual text with Chinese characters for grep).
+- `tools/esp32_dap/` — custom CMSIS-DAP probe on ESP32-S3 (USB), for when no ST-Link is at hand.
+- `re/` — Ghidra scripts (SVD → peripheral map, markup, decompilation) and the function list of the stock firmware.
 
-## Что дальше
-Магнитный энкодер на выходе (MT6701, аналог → I2C на свободных падах) и непрерывное вращение, компенсация мёртвого хода
-по двум датчикам, двусторонняя шина с ПК, 48 В, одношунтовый FOC после осциллографа на тракте шунта — [docs/roadmap.md](docs/roadmap.md),
-чеклист — [TODO.md](TODO.md).
+## What's next
+Magnetic encoder on the output (MT6701, analog → I2C on free pads) and continuous rotation, backlash compensation
+with two sensors, two-way bus with a PC, 48 V, single-shunt FOC after scoping the shunt path — [docs/roadmap.md](docs/roadmap.md),
+checklist — [TODO.md](TODO.md).
 
-## Честность
-Все числа помечены: [ИЗМ] — измерено, [ДШ] — из даташита, [ПАСП] — из паспорта Kpower, [ГИП] — гипотеза. Бинарные дампы родной
-прошивки и чужие PDF в репозиторий не включены (ссылки в `docs/datasheets/README.md`). Проект образовательный.
+## Honesty
+All numbers are tagged: [MEAS] — measured, [DS] — from a datasheet, [SPEC] — from the Kpower spec sheet, [HYP] — hypothesis. Binary dumps of the stock
+firmware and third-party PDFs are not included in the repository (links in `docs/datasheets/README.md`). The project is educational.

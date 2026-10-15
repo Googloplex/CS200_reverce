@@ -2,7 +2,7 @@
 
 volatile uint32_t g_ms;
 
-/* ---------- SYSCTRL / CHIPCTRL с ключами ---------- */
+/* ---------- SYSCTRL / CHIPCTRL with keys ---------- */
 static void sc_write(volatile uint32_t *reg, uint32_t val)
 {
     uint32_t pm = __get_PRIMASK();
@@ -32,7 +32,7 @@ void cc_pwr_cfg_and(uint32_t mask)
     __set_PRIMASK(pm);
 }
 
-/* ---------- GPIO (повтор вендорского GPIO_Init) ---------- */
+/* ---------- GPIO (replica of vendor GPIO_Init) ---------- */
 void gpio_init(uint32_t port, const gpio_cfg_t *c)
 {
     uint8_t pupd = (c->mode == 1) ? 0 : c->pupd;
@@ -70,8 +70,8 @@ void dma_ch_deinit(unsigned ch)
 {
     uint32_t c = DMA_CH(ch);
     uint32_t bit = 1u << ch;
-    DMAC_CFG |= 1u;                                   // контроллер включён
-    DMAC_CHEN = (DMAC_CHEN | (bit << 8)) & ~bit;      // канал выключен
+    DMAC_CFG |= 1u;                                   // controller enabled
+    DMAC_CHEN = (DMAC_CHEN | (bit << 8)) & ~bit;      // channel disabled
     DMA_SAR(c) = 0;
     DMA_DAR(c) = 0;
     DMA_CTL_L(c) = 0;
@@ -90,7 +90,7 @@ void dma_ch_enable(unsigned ch, int on)
     DMAC_CHEN = on ? (0x101u << ch) : ((0x100u << ch) | (DMAC_CHEN & ~(1u << ch)));
 }
 
-/* ---------- клоки периферии (порядок как в родной) ---------- */
+/* ---------- peripheral clocks (same order as stock) ---------- */
 void board_clocks_init(void)
 {
     sc_clk0_enable(SC_CLK_GPIOA);
@@ -109,7 +109,7 @@ void board_clocks_init(void)
     sc_clk2_enable(SC_CLK2_ANA);
 }
 
-/* ---------- выводы платы (FUN_0800346c) ---------- */
+/* ---------- board pins (FUN_0800346c) ---------- */
 static void exti_line_both_edges(uint32_t line)
 {
     EXTI_IMR &= ~line;
@@ -125,49 +125,49 @@ void board_gpio_init(void)
 {
     gpio_cfg_t c;
 
-    // PA2 — шина, по умолчанию приём (AF7 = UART1_RX). Отличие от родной: подтяжка вверх, чтобы линия
-    // не лежала в нуле без мастера и работала с адаптером через диод (в родной pupd = 0).
+    // PA2 — bus, receive by default (AF7 = UART1_RX). Differs from stock: pull-up, so the line
+    // does not sit low without a master and works with a diode adapter (stock has pupd = 0).
     c = (gpio_cfg_t){ .pins = 1u << PIN_BUS, .mode = 2, .speed = 1, .otype = 0, .pupd = 1 };
     gpio_init(GPIOA_B, &c);
     gpio_af(GPIOA_B, PIN_BUS, AF_BUS_RX);
 
-    // PA3 — вход ШИМ, TIM15_CH2 (AF0), подтяжка вниз
+    // PA3 — PWM input, TIM15_CH2 (AF0), pull-down
     c = (gpio_cfg_t){ .pins = 1u << PIN_PWM_IN, .mode = 2, .speed = 1, .otype = 0, .pupd = 2 };
     gpio_init(GPIOA_B, &c);
     gpio_af(GPIOA_B, PIN_PWM_IN, 0);
 
-    // PB3/PB4/PB6/PB7 — входы предрайвера, AF, подтяжка вниз
+    // PB3/PB4/PB6/PB7 — predriver inputs, AF, pull-down
     c = (gpio_cfg_t){ .pins = 0xD8, .mode = 2, .speed = 1, .otype = 0, .pupd = 2 };
     gpio_init(GPIOB_B, &c);
     gpio_af(GPIOB_B, 3, 1);   // TIM1_CH1N
     gpio_af(GPIOB_B, 4, 2);   // TIM1_CH2N
     gpio_af(GPIOB_B, 6, 4);   // TIM1_CH3N
     gpio_af(GPIOB_B, 7, 5);   // TIM1_CH1
-    // PF3/PF4 — входы предрайвера
+    // PF3/PF4 — predriver inputs
     c.pins = 0x18;
     gpio_init(GPIOF_B, &c);
     gpio_af(GPIOF_B, 3, 2);   // TIM1_CH2
     gpio_af(GPIOF_B, 4, 2);   // TIM1_CH3
 
-    // PA4..PA6 — Холлы: вход, подтяжка вверх, EXTI по обоим фронтам
+    // PA4..PA6 — Halls: input, pull-up, EXTI on both edges
     c = (gpio_cfg_t){ .pins = 0x70, .mode = 0, .speed = 1, .otype = 0, .pupd = 1 };
     gpio_init(GPIOA_B, &c);
     exti_line_both_edges(1u << 4);
     exti_line_both_edges(1u << 5);
     exti_line_both_edges(1u << 6);
 
-    // PA1, PA7, PA10 — аналоговые входы АЦП
+    // PA1, PA7, PA10 — ADC analog inputs
     c = (gpio_cfg_t){ .pins = 0x482, .mode = 3, .speed = 1, .otype = 0, .pupd = 0 };
     gpio_init(GPIOA_B, &c);
     gpio_af(GPIOA_B, 1, 1);
     gpio_af(GPIOA_B, 7, 1);
     gpio_af(GPIOA_B, 10, 1);
-    // PF6 — аналоговый вход (ток)
+    // PF6 — analog input (current)
     c.pins = 0x40;
     gpio_init(GPIOF_B, &c);
     gpio_af(GPIOF_B, 6, 1);
 
-    // PA0 — выход ШИМ обратной связи, TIM16_CH1 (AF3)
+    // PA0 — feedback PWM output, TIM16_CH1 (AF3)
     c = (gpio_cfg_t){ .pins = 1u << PIN_FB_OUT, .mode = 2, .speed = 1, .otype = 0, .pupd = 0 };
     gpio_init(GPIOA_B, &c);
     gpio_af(GPIOA_B, PIN_FB_OUT, 3);
@@ -176,13 +176,13 @@ void board_gpio_init(void)
 /* ---------- SysTick + NVIC ---------- */
 void board_nvic_init(void)
 {
-    SysTick->LOAD = 71999u;          // 1 кГц при 72 МГц
-    SCB->SHP[1] &= 0x00FFFFFFu;      // приоритет SysTick = 0
+    SysTick->LOAD = 71999u;          // 1 kHz at 72 MHz
+    SCB->SHP[1] &= 0x00FFFFFFu;      // SysTick priority = 0
     SysTick->VAL = 0;
     SysTick->CTRL = 7;
 
     NVIC_SetPriority(EXTI4_15_IRQn, PRIO_HALL);   NVIC_EnableIRQ(EXTI4_15_IRQn);
-    NVIC_SetPriority(TIM1_NON_CC_IRQn, PRIO_HALL); NVIC_EnableIRQ(TIM1_NON_CC_IRQn);   // синус: обновление CCR каждый период ШИМ (DIER.UIE включается с режимом)
+    NVIC_SetPriority(TIM1_NON_CC_IRQn, PRIO_HALL); NVIC_EnableIRQ(TIM1_NON_CC_IRQn);   // sinusoidal: CCR update every PWM period (DIER.UIE enabled with the mode)
     NVIC_SetPriority(DMAC_CH1_2_IRQn, PRIO_DMA);  NVIC_EnableIRQ(DMAC_CH1_2_IRQn);
     NVIC_SetPriority(TIM15_IRQn, PRIO_TIM15);     NVIC_EnableIRQ(TIM15_IRQn);
     NVIC_SetPriority(TIM6_DAC0_2_IRQn, PRIO_TIM6);NVIC_EnableIRQ(TIM6_DAC0_2_IRQn);

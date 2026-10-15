@@ -852,7 +852,7 @@ typedef struct {                                /*!< (@ 0x40017400) IWDG Structu
   * @brief Nested Vectored Interrupt Controller (NVIC)
   */
 
-/* NVIC_Type: убрано — конфликтует с core_cm0.h (правка для GCC-сборки) */                                    /*!< Size = 800 (0x320)                                                        */
+/* NVIC_Type: removed — conflicts with core_cm0.h (GCC build fix) */                                    /*!< Size = 800 (0x320)                                                        */
 
 
 
@@ -912,7 +912,7 @@ typedef struct {                                /*!< (@ 0x48014000) DIV Structur
 #define ADC_BASE                    0x4001A000UL
 #define WWDG_BASE                   0x4000D000UL
 #define IWDG_BASE                   0x40017400UL
-/* NVIC_BASE: см. core_cm0.h */
+/* NVIC_BASE: see core_cm0.h */
 #define DIV_BASE                    0x48014000UL
 
 /** @} */ /* End of group Device_Peripheral_peripheralAddr */
@@ -951,7 +951,7 @@ typedef struct {                                /*!< (@ 0x48014000) DIV Structur
 #define ADC                         ((ADC_Type*)               ADC_BASE)
 #define WWDG                        ((WWDG_Type*)              WWDG_BASE)
 #define IWDG                        ((IWDG_Type*)              IWDG_BASE)
-/* NVIC: см. core_cm0.h */
+/* NVIC: see core_cm0.h */
 #define DIV                         ((DIV_Type*)               DIV_BASE)
 
 /** @} */ /* End of group Device_Peripheral_declaration */

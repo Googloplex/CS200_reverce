@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""lockrotor_test.py — R обмотки по заблокированному ротору: короткие импульсы duty в режиме колеса, R = U/I_wind.
+"""lockrotor_test.py — winding R from a locked rotor: short duty pulses in wheel mode, R = U/I_wind.
   py -3.11 tools/lockrotor_test.py [--duty 80,120]"""
 import os, struct, sys, time
 from pyocd.core.helpers import ConnectHelper
@@ -27,7 +27,7 @@ def main():
         hb(); t.write16(regs + 0x54, 500); t.write16(regs + 0x22, 1000); t.write16(regs + 0x50, 8000); t.write16(regs + 6, 0); t.write16(regs + 8, 0)
         results = []
         try:
-            print("старт:", rd())
+            print("start:", rd())
             for dty in duties:
                 for sgn in (1, -1):
                     t.write16(regs + 0x20, (dty & 0x3FF) | (0x400 if sgn < 0 else 0))
@@ -37,7 +37,7 @@ def main():
                     while time.time() - t0 < 0.4:
                         hb(); r = rd(); rows.append((time.time() - t0, r))
                         if abs(r["hall"]) > 300 or r["load"] > 9000:
-                            stop(); print(f"   duty {sgn*dty:+d}: ротор провернулся ({r['hall']} шаг/с) или ток {r['load']} — стоп"); break
+                            stop(); print(f"   duty {sgn*dty:+d}: rotor turned ({r['hall']} step/s) or current {r['load']} — stop"); break
                         time.sleep(0.02)
                     stop(); time.sleep(0.4)
                     tail = [r for dt, r in rows if dt > 0.2]
@@ -47,14 +47,14 @@ def main():
                     u = vb * du / 1024
                     r_mohm = u / iw * 1000 if iw else float("nan")
                     hall = max(abs(r["hall"]) for r in tail)
-                    print(f"duty {sgn*dty:+4d}: U {u/1000:5.2f} В  I_bus {ib:5.0f} мА  I_wind {iw:5.0f} мА  ω {hall:4d}  → R ≈ {r_mohm:4.0f} мОм   (R_est онлайн {tail[-1]['rest']}, код Холлов {tail[-1]['code']})")
+                    print(f"duty {sgn*dty:+4d}: U {u/1000:5.2f} V  I_bus {ib:5.0f} mA  I_wind {iw:5.0f} mA  ω {hall:4d}  → R ≈ {r_mohm:4.0f} mΩ   (online R_est {tail[-1]['rest']}, Hall code {tail[-1]['code']})")
                     if hall < 50 and iw > 500: results.append(r_mohm)
             if results:
-                print(f"\nR фаза-фаза по {len(results)} точкам: {sum(results)/len(results):.0f} мОм (разброс {min(results):.0f}..{max(results):.0f}); R_REF сейчас {t.read16(regs + 0x16)}")
+                print(f"\nR phase-to-phase over {len(results)} points: {sum(results)/len(results):.0f} mΩ (spread {min(results):.0f}..{max(results):.0f}); R_REF now {t.read16(regs + 0x16)}")
         finally:
             stop()
             t.write16(regs + 0x54, saved["tmo"]); t.write16(regs + 0x22, saved["tl"]); t.write16(regs + 6, saved["cw"]); t.write16(regs + 8, saved["ccw"]); t.write16(regs + 0x50, saved["lim"]); t.write16(regs + 0x20, saved["speed"])
-            print("момент выключен:", rd())
+            print("torque disabled:", rd())
 
 if __name__ == "__main__":
     try: sys.stdout.reconfigure(encoding="utf-8", errors="replace")
