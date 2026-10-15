@@ -17,6 +17,15 @@ interpolation, sinusoidal commutation with Hall interpolation, self-identificati
 - Родная прошивка: Dynamixel Protocol 1.0 (таблица AX-12 плюс поля Kpower) по полудуплексному UART на сигнальном проводе,
   загрузчик с обновлением по тому же проводу, журнал настроек во Flash.
 
+## Как это выглядело в первый день
+Подписи на фото — гипотезы до прозвонки и реверса (со знаками вопроса); проверенная распиновка — в [docs/pinmap.md](docs/pinmap.md).
+
+| Плата со стороны MCU | Обратная сторона: питание логики |
+|---|---|
+| ![Плата: SWD-гребёнка, потенциометр, пады G/S/F, силовые площадки](docs/photos/servo_pinout.png) | ![Обратная сторона: XL7005A, SS34, электролиты, керамика, TVS, жгут](docs/photos/servo_pinout_back.png) |
+
+![MCU LCP037BT крупно: столбик из 5 площадок (VDD, GND, SWDIO, SWCLK, nRST), 12 ключей NCEP6090AGU, шунт 2R5m, резисторы затворов](docs/photos/servo_mcu_pinout.png)
+
 ## Что сделано
 | Этап | Результат |
 |---|---|
