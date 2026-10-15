@@ -1,0 +1,27 @@
+menu "CMSIS-DAP probe"
+
+    config DAP_SWCLK_GPIO
+        int "SWCLK GPIO"
+        range 0 31
+        default 12
+
+    config DAP_SWDIO_GPIO
+        int "SWDIO GPIO"
+        range 0 31
+        default 11
+
+    config DAP_NRESET_GPIO
+        int "nRESET GPIO (open-drain, -1 to disable)"
+        range -1 48
+        default 13
+
+    config DAP_LED_GPIO
+        int "Status LED GPIO (active high, -1 to disable)"
+        range -1 48
+        default -1
+
+    config DAP_DEFAULT_CLOCK_HZ
+        int "Default SWD clock, Hz"
+        default 1000000
+
+endmenu

@@ -1,0 +1,12 @@
+CONFIG_IDF_TARGET="esp32s3"
+
+# 240 MHz CPU and 1 kHz tick for low command latency
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+CONFIG_FREERTOS_HZ=1000
+
+# One vendor-specific interface for CMSIS-DAP v2 (bulk endpoints).
+# FIFOs are exactly one packet so each read returns exactly one DAP command.
+CONFIG_TINYUSB_VENDOR_COUNT=1
+CONFIG_TINYUSB_VENDOR_RX_BUFSIZE=64
+CONFIG_TINYUSB_VENDOR_TX_BUFSIZE=64
+CONFIG_TINYUSB_VENDOR_EPSIZE=64

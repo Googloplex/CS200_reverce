@@ -1,0 +1,2 @@
+t_ms,goal_us,goal_adc,pos,load,volt,speed,hall,i_bus,vbus_mv,i_wind,status,duty
+8,1000,1231,2260,6423,232,0,-31,25,26882,91,1,212

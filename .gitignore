@@ -1,0 +1,7 @@
+fw/build/
+__pycache__/
+*.pyc
+docs/datasheets/*.pdf
+docs/datasheets/*.txt
+docs/datasheets/*/
+*.bin
