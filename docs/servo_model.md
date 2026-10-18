@@ -31,6 +31,8 @@ custom firmware, unloaded output, bench PSU unless noted.
 | Torque per winding amp | k = Kt·N·η = 1.47·η N·m/A → 1.03 (η 0.7) … 1.31 (η 0.89) N·m/A; minus ~0.85 A no-load current |
 | Motor inertia referred to the output | J·N² ≈ 0.042 kg·m² (like 1 kg at a 20 cm radius) |
 | Torque–speed (full duty) | I(ω) = (V − ω·N/(6·Kv))/R, ω in °/s at the output; T = k·(min(I, I_lim) − I₀) |
+| Equation of motion (output side, rad/s²) | Kt·N·(I − I₀) = J_rotor·N²·α + (J_load·α + T_load)/η — the rotor inertia sits BEFORE the gearbox, η does not apply to it; with a light load most of the current accelerates the rotor (0.042 kg·m²) |
+| Voltage needed for current I at speed ω | V ≥ I·R + ω/39.0 (ω in °/s at the output): 25 A at 800 °/s → ≥ 33 V (hot winding ~37 V); at 24 V, 25 A is available only up to ~440 °/s |
 
 Output speed up to which the full current I_lim is available: ω_c = 39.0·(V − I_lim·R) °/s (R = 0.505; hot winding ~5–10 % lower) [calc]:
 
