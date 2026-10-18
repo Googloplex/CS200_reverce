@@ -126,7 +126,8 @@ conclusion and the reason why the next step is an encoder on the output.
 ## What is where
 - `docs/` — reverse engineering results and references: [registers_v1.md](docs/registers_v1.md) (registers, bits, instructions, behaviour),
   [bench_log.md](docs/bench_log.md) (all bench tests in order), [motor.md](docs/motor.md), [pinmap.md](docs/pinmap.md),
-  [native_fw_config.md](docs/native_fw_config.md), [memory_map.md](docs/memory_map.md), [clone_ab_test.md](docs/clone_ab_test.md), [roadmap.md](docs/roadmap.md).
+  [native_fw_config.md](docs/native_fw_config.md), [memory_map.md](docs/memory_map.md), [clone_ab_test.md](docs/clone_ab_test.md), [roadmap.md](docs/roadmap.md),
+  [servo_model.md](docs/servo_model.md) (servo parameters and torque–speed model for calculations).
 - `fw/` — firmware: `src/` (board, system, regs, dxl, sense, motor, startup), `ld/app.ld`, `cmake/`, `build.sh`, `flash.sh`, `restore_native.sh`, [README](fw/README.md).
 - `tools/` — bench tests and utilities on pyOCD, ESP32-S3 probe.
 - `dumps/servo_01/` — dump checksums, decoded journal, step response logs.
