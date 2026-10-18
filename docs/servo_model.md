@@ -98,3 +98,5 @@ inductance — at high speed the real current and torque are lower than calculat
 ## Not measured (needed for an honest model)
 Gearbox efficiency, winding inductance, thermal time constants and continuous current, dead band at the output shaft itself,
 acceleration and braking without the bench limits (battery supply, 15 A, regeneration into the battery).
+
+Fast moves (rotor inertia, RMS current, voltage needed for current at speed, trajectory shapes) — [dynamics.md](dynamics.md).
